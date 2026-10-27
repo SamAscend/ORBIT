@@ -18,6 +18,7 @@ type DirectoryMember = { userId: string; fullName: string; username: string; cre
 type WorkspaceData = { events: CommunityEvent[]; quests: CommunityQuest[]; members: DirectoryMember[] };
 type EventDraft = { title: string; description: string; visibility: "public" | "private"; status: "open" | "cancelled" | "completed"; startAt: string; location: string; capacity: string };
 type QuestDraft = { title: string; description: string; xpReward: string; goal: string; deadline: string };
+type CommunityDetail = { kind: "event"; item: CommunityEvent } | { kind: "quest"; item: CommunityQuest };
 
 function greetingFor(hour: number) {
   if (hour < 12) return "Good morning";
@@ -25,7 +26,7 @@ function greetingFor(hour: number) {
   return "Good evening";
 }
 
-function Icon({ name }: { name: "grid" | "calendar" | "flag" | "users" | "card" | "settings" | "logout" }) {
+function Icon({ name }: { name: "grid" | "calendar" | "flag" | "users" | "card" | "settings" | "logout" | "eye" }) {
   const paths: Record<typeof name, React.ReactNode> = {
     grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
     calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,
@@ -34,6 +35,7 @@ function Icon({ name }: { name: "grid" | "calendar" | "flag" | "users" | "card" 
     card: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18M7 15h3" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19 13.5v-3l-2-.7a6 6 0 0 0-.6-1.4l1-1.8-2.1-2.1-1.8 1a6 6 0 0 0-1.5-.6l-.6-2h-3l-.7 2a6 6 0 0 0-1.4.6l-1.8-1-2.1 2.1 1 1.8a6 6 0 0 0-.6 1.5l-2 .6v3l2 .7a6 6 0 0 0 .6 1.4l-1 1.8 2.1 2.1 1.8-1a6 6 0 0 0 1.5.6l.6 2h3l.7-2a6 6 0 0 0 1.4-.6l1.8 1 2.1-2.1-1-1.8a6 6 0 0 0 .6-1.5z" transform="translate(2 1) scale(.83)" /></>,
     logout: <><path d="M10 17l5-5-5-5M15 12H3" /><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6" /></>,
+    eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>,
   };
   return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
@@ -50,6 +52,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
   const [signingOut, setSigningOut] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<CommunityDetail | null>(null);
 
   const displayName = useMemo(() => {
     if (role === "admin") return "Admin";
@@ -170,8 +173,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
       const supabase = createClient();
       const { error: signOutError } = await supabase.auth.signOut();
       if (signOutError) throw signOutError;
-      router.replace("/");
-      router.refresh();
+      window.location.replace("/");
     } catch (signOutError) {
       console.error("Could not sign out.", signOutError);
       setError(signOutError instanceof Error ? signOutError.message : "Could not sign out.");
@@ -218,16 +220,17 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
 
           {activeView === "Overview" && (role === "admin"
             ? <AdminOverview counts={counts} loading={loading} onNavigate={setView} />
-            : <MemberOverview counts={counts} loading={loading} name={displayName} email={user.email ?? ""} events={workspaceData.events} quests={workspaceData.quests} onNavigate={setView} />)}
+            : <MemberOverview counts={counts} loading={loading} name={displayName} email={user.email ?? ""} events={workspaceData.events} quests={workspaceData.quests} onNavigate={setView} onViewDetail={setSelectedDetail} />)}
           {activeView === "Events" && (role === "admin"
             ? <EventManager events={workspaceData.events} adminId={user.id} onChanged={() => setRefreshKey((key) => key + 1)} />
-            : <EmptyWorkspaceSection role={role} kind="events" count={counts.events} loading={loading} events={workspaceData.events} />)}
+            : <EmptyWorkspaceSection role={role} kind="events" count={counts.events} loading={loading} events={workspaceData.events} onViewDetail={setSelectedDetail} />)}
           {activeView === "Quests" && (role === "admin"
             ? <QuestManager quests={workspaceData.quests} adminId={user.id} onChanged={() => setRefreshKey((key) => key + 1)} />
-            : <EmptyWorkspaceSection role={role} kind="quests" count={counts.quests} loading={loading} quests={workspaceData.quests} />)}
+            : <EmptyWorkspaceSection role={role} kind="quests" count={counts.quests} loading={loading} quests={workspaceData.quests} onViewDetail={setSelectedDetail} />)}
           {activeView === "Members" && role === "admin" && <EmptyWorkspaceSection role={role} kind="members" count={counts.members} loading={loading} members={workspaceData.members} onToggleMemberAccess={toggleMemberAccess} memberActionId={memberActionId} />}
           {activeView === "Membership" && role === "member" && <MemberCard counts={counts} loading={loading} name={displayName} email={user.email ?? ""} />}
         </div>
+        {selectedDetail && <CommunityDetailDialog detail={selectedDetail} onClose={() => setSelectedDetail(null)} />}
         <footer className="page-footer"><span>BUILT FOR THE MILES AHEAD <b>✳</b></span><span>ORBIT · Community, in motion.</span></footer>
       </main>
     </div>
@@ -247,11 +250,11 @@ function AdminOverview({ counts, loading, onNavigate }: { counts: Counts; loadin
   </>;
 }
 
-function MemberOverview({ counts, loading, name, email, events, quests, onNavigate }: { counts: Counts; loading: boolean; name: string; email: string; events: CommunityEvent[]; quests: CommunityQuest[]; onNavigate: (view: ViewName) => void }) {
+function MemberOverview({ counts, loading, name, email, events, quests, onNavigate, onViewDetail }: { counts: Counts; loading: boolean; name: string; email: string; events: CommunityEvent[]; quests: CommunityQuest[]; onNavigate: (view: ViewName) => void; onViewDetail: (detail: CommunityDetail) => void }) {
   return <>
     <section className="member-welcome-card"><div className="welcome-card-copy"><span className="eyebrow">YOU’RE PART OF THE CREW</span><h2>Good to have you here, {name}.</h2><p>Your community membership is ready. Find an event or take on a quest when you’re ready.</p><button className="button button-primary" onClick={() => onNavigate("Events")}>Explore what’s happening <span>↗</span></button></div><OrbitSymbol className="welcome-card-mark" decorative /></section>
     <section className="metric-grid workspace-metrics member-metrics"><Metric title="My membership" value={counts.crewNumber === null ? "—" : `MZ-${String(counts.crewNumber).padStart(4, "0")}`} icon="card" loading={loading} /><Metric title="Community events" value={counts.events} icon="calendar" loading={loading} /><Metric title="Open quests" value={counts.quests} icon="flag" loading={loading} /><Metric title="My XP" value={counts.xp} icon="grid" loading={loading} /></section>
-    <section className="content-grid member-content-grid"><div className="workspace-panel"><div className="panel-heading"><div><span className="eyebrow">A GOOD PLACE TO START</span><h2>Find your next moment</h2></div><button className="text-link" onClick={() => onNavigate("Events")}>See events <span>↗</span></button></div>{events.length === 0 ? <EmptyMessage title="No events just yet" detail="When an organizer adds an event, you’ll find it here." /> : <EventList events={events.slice(0, 3)} />}</div><div className="workspace-panel"><div className="panel-heading"><div><span className="eyebrow">PROGRESS, NOT PERFECTION</span><h2>Quests for you</h2></div><button className="text-link" onClick={() => onNavigate("Quests")}>Explore <span>↗</span></button></div>{quests.length === 0 ? <EmptyMessage title="Your next challenge is on its way" detail="New crew quests will show up here." /> : <QuestList quests={quests.slice(0, 3)} />}</div></section>
+    <section className="content-grid member-content-grid"><div className="workspace-panel"><div className="panel-heading"><div><span className="eyebrow">A GOOD PLACE TO START</span><h2>Find your next moment</h2></div><button className="text-link" onClick={() => onNavigate("Events")}>See events <span>↗</span></button></div>{events.length === 0 ? <EmptyMessage title="No events just yet" detail="When an organizer adds an event, you’ll find it here." /> : <EventList events={events.slice(0, 3)} onView={(item) => onViewDetail({ kind: "event", item })} />}</div><div className="workspace-panel"><div className="panel-heading"><div><span className="eyebrow">PROGRESS, NOT PERFECTION</span><h2>Quests for you</h2></div><button className="text-link" onClick={() => onNavigate("Quests")}>Explore <span>↗</span></button></div>{quests.length === 0 ? <EmptyMessage title="Your next challenge is on its way" detail="New crew quests will show up here." /> : <QuestList quests={quests.slice(0, 3)} onView={(item) => onViewDetail({ kind: "quest", item })} />}</div></section>
     <p className="member-account-note">Signed in as <b>{email}</b>. Your member profile is managed by your account.</p>
   </>;
 }
@@ -261,11 +264,11 @@ function MemberCard({ counts, loading, name, email }: { counts: Counts; loading:
   return <><section className="page-heading"><div><span className="eyebrow">YOUR COMMUNITY, YOUR CARD</span><h1>Membership</h1><p className="page-intro">Your place in the crew, always close at hand.</p></div></section><div className="member-card"><div className="member-card-top"><div className="brand-lockup brand-light"><OrbitLogo className="card-orbit-logo" /></div><span className="card-chip">CREW MEMBER</span></div><div className="card-member-info"><span className="eyebrow">GOOD TO HAVE YOU HERE</span><h2>{name}</h2><span>{email}</span></div><div className="card-footer"><div><span className="eyebrow">YOUR CREW ID</span><b>{loading ? "…" : crewId}</b></div><span className="member-card-mark">✳</span></div></div></>;
 }
 
-function EmptyWorkspaceSection({ role, kind, count, loading, events = [], quests = [], members = [], onToggleMemberAccess, memberActionId }: { role: WorkspaceRole; kind: "events" | "quests" | "members"; count: number; loading: boolean; events?: CommunityEvent[]; quests?: CommunityQuest[]; members?: DirectoryMember[]; onToggleMemberAccess?: (member: DirectoryMember) => void; memberActionId?: string | null }) {
+function EmptyWorkspaceSection({ role, kind, count, loading, events = [], quests = [], members = [], onToggleMemberAccess, memberActionId, onViewDetail }: { role: WorkspaceRole; kind: "events" | "quests" | "members"; count: number; loading: boolean; events?: CommunityEvent[]; quests?: CommunityQuest[]; members?: DirectoryMember[]; onToggleMemberAccess?: (member: DirectoryMember) => void; memberActionId?: string | null; onViewDetail?: (detail: CommunityDetail) => void }) {
   const title = kind === "events" ? "Events" : kind === "quests" ? "Quests & missions" : "Member directory";
   const detail = kind === "events" ? "Community events will appear here once they’re created." : kind === "quests" ? "Quests will appear here once an admin creates them." : "Member accounts appear here after people sign up.";
   const hasData = kind === "events" ? events.length > 0 : kind === "quests" ? quests.length > 0 : members.length > 0;
-  return <><section className="page-heading"><div><span className="eyebrow">{role === "admin" ? "ORBIT COMMUNITY" : "YOUR ORBIT COMMUNITY"}</span><h1>{title}</h1><p className="page-intro">{role === "admin" ? "Review members and control member access." : "Everything here comes from your community workspace."}</p></div></section>{hasData ? <section className="workspace-panel data-list-panel">{kind === "events" && <EventList events={events} />}{kind === "quests" && <QuestList quests={quests} />}{kind === "members" && <MemberList members={members} onToggleAccess={onToggleMemberAccess} busyMemberId={memberActionId} />}</section> : <section className="workspace-panel empty-page-panel"><span className="empty-illustration"><Icon name={kind === "events" ? "calendar" : kind === "quests" ? "flag" : "users"} /></span><span className="eyebrow">{loading ? "LOADING" : `${count} ${kind.toUpperCase()}`}</span><h2>{loading ? "Getting your workspace ready" : kind === "members" ? "The crew starts here." : "A fresh start."}</h2><p>{loading ? "Checking the latest ORBIT data." : detail}</p></section>}</>;
+  return <><section className="page-heading"><div><span className="eyebrow">{role === "admin" ? "ORBIT COMMUNITY" : "YOUR ORBIT COMMUNITY"}</span><h1>{title}</h1><p className="page-intro">{role === "admin" ? "Review members and control member access." : "Everything here comes from your community workspace."}</p></div></section>{hasData ? <section className="workspace-panel data-list-panel">{kind === "events" && <EventList events={events} onView={onViewDetail ? (item) => onViewDetail({ kind: "event", item }) : undefined} />}{kind === "quests" && <QuestList quests={quests} onView={onViewDetail ? (item) => onViewDetail({ kind: "quest", item }) : undefined} />}{kind === "members" && <MemberList members={members} onToggleAccess={onToggleMemberAccess} busyMemberId={memberActionId} />}</section> : <section className="workspace-panel empty-page-panel"><span className="empty-illustration"><Icon name={kind === "events" ? "calendar" : kind === "quests" ? "flag" : "users"} /></span><span className="eyebrow">{loading ? "LOADING" : `${count} ${kind.toUpperCase()}`}</span><h2>{loading ? "Getting your workspace ready" : kind === "members" ? "The crew starts here." : "A fresh start."}</h2><p>{loading ? "Checking the latest ORBIT data." : detail}</p></section>}</>;
 }
 
 function localDateTimeValue(value: string) {
@@ -448,7 +451,7 @@ function QuestManager({ quests, adminId, onChanged }: { quests: CommunityQuest[]
   </>;
 }
 
-function EventList({ events, onEdit, onDelete, busy = false }: { events: CommunityEvent[]; onEdit?: (event: CommunityEvent) => void; onDelete?: (event: CommunityEvent) => void; busy?: boolean }) {
+function EventList({ events, onEdit, onDelete, onView, busy = false }: { events: CommunityEvent[]; onEdit?: (event: CommunityEvent) => void; onDelete?: (event: CommunityEvent) => void; onView?: (event: CommunityEvent) => void; busy?: boolean }) {
   return (
     <div className="workspace-data-list">
       {events.map((event) => (
@@ -459,6 +462,7 @@ function EventList({ events, onEdit, onDelete, busy = false }: { events: Communi
             <small>{new Date(event.start_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}{event.location ? ` · ${event.location}` : ""} · {event.visibility}</small>
           </span>
           <span className={`status-pill ${event.status === "open" ? "active" : "pending"}`}><i />{event.status}</span>
+          {onView && <button type="button" className="button button-secondary detail-view-button" onClick={() => onView(event)} aria-label={`View details for ${event.title}`} title="View details"><Icon name="eye" /></button>}
           {onEdit && onDelete && (
             <div className="management-row-actions">
               <button className="button button-secondary" onClick={() => onEdit(event)} disabled={busy}>Edit</button>
@@ -471,8 +475,43 @@ function EventList({ events, onEdit, onDelete, busy = false }: { events: Communi
   );
 }
 
-function QuestList({ quests, onEdit, onDelete, busy = false }: { quests: CommunityQuest[]; onEdit?: (quest: CommunityQuest) => void; onDelete?: (quest: CommunityQuest) => void; busy?: boolean }) {
-  return <div className="workspace-data-list">{quests.map((quest) => <article className="workspace-data-row" key={quest.id}><span className="quicklink-icon lavender"><Icon name="flag" /></span><span className="workspace-data-copy"><b>{quest.title}</b><small>{quest.xp_reward} XP · Goal {quest.goal}{quest.deadline ? ` · Due ${new Date(quest.deadline).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : ""}</small></span>{onEdit && <div className="management-row-actions"><button className="button button-secondary" onClick={() => onEdit(quest)} disabled={busy}>Edit</button>{onDelete && <button className="button button-danger" onClick={() => onDelete(quest)} disabled={busy}>Delete</button>}</div>}</article>)}</div>;
+function QuestList({ quests, onEdit, onDelete, onView, busy = false }: { quests: CommunityQuest[]; onEdit?: (quest: CommunityQuest) => void; onDelete?: (quest: CommunityQuest) => void; onView?: (quest: CommunityQuest) => void; busy?: boolean }) {
+  return <div className="workspace-data-list">{quests.map((quest) => <article className="workspace-data-row" key={quest.id}><span className="quicklink-icon lavender"><Icon name="flag" /></span><span className="workspace-data-copy"><b>{quest.title}</b><small>{quest.xp_reward} XP · Goal {quest.goal}{quest.deadline ? ` · Due ${new Date(quest.deadline).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : ""}</small></span>{onView && <button type="button" className="button button-secondary detail-view-button" onClick={() => onView(quest)} aria-label={`View details for ${quest.title}`} title="View details"><Icon name="eye" /></button>}{onEdit && <div className="management-row-actions"><button className="button button-secondary" onClick={() => onEdit(quest)} disabled={busy}>Edit</button>{onDelete && <button className="button button-danger" onClick={() => onDelete(quest)} disabled={busy}>Delete</button>}</div>}</article>)}</div>;
+}
+
+function CommunityDetailDialog({ detail, onClose }: { detail: CommunityDetail; onClose: () => void }) {
+  const isEvent = detail.kind === "event";
+  const title = detail.item.title;
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="modal-card community-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="community-detail-title">
+        <div className="modal-heading">
+          <div><span className="eyebrow">{isEvent ? "ORBIT COMMUNITY EVENT" : "ORBIT COMMUNITY QUEST"}</span><h2 id="community-detail-title">{title}</h2></div>
+          <button className="button button-secondary" onClick={onClose} aria-label="Close details">Close</button>
+        </div>
+        {isEvent
+          ? <div className="community-detail-content">
+              <p>{detail.item.description || "No description provided."}</p>
+              <dl className="community-detail-list">
+                <div><dt>Date and time</dt><dd>{new Date(detail.item.start_at).toLocaleString(undefined, { dateStyle: "full", timeStyle: "short" })}</dd></div>
+                <div><dt>Location</dt><dd>{detail.item.location || "Not specified"}</dd></div>
+                <div><dt>Capacity</dt><dd>{detail.item.capacity === null ? "No limit" : detail.item.capacity}</dd></div>
+                <div><dt>Visibility</dt><dd>{detail.item.visibility}</dd></div>
+                <div><dt>Status</dt><dd>{detail.item.status}</dd></div>
+              </dl>
+            </div>
+          : <div className="community-detail-content">
+              <p>{detail.item.description || "No description provided."}</p>
+              <dl className="community-detail-list">
+                <div><dt>XP reward</dt><dd>{detail.item.xp_reward} XP</dd></div>
+                <div><dt>Goal</dt><dd>{detail.item.goal}</dd></div>
+                <div><dt>Deadline</dt><dd>{detail.item.deadline ? new Date(detail.item.deadline).toLocaleString(undefined, { dateStyle: "full", timeStyle: "short" }) : "No deadline"}</dd></div>
+              </dl>
+            </div>}
+      </section>
+    </div>
+  );
 }
 
 function MemberList({ members, onToggleAccess, busyMemberId }: { members: DirectoryMember[]; onToggleAccess?: (member: DirectoryMember) => void; busyMemberId?: string | null }) {

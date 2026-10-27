@@ -3,14 +3,30 @@ import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
-  if (!code) return confirmationFailed(request);
+  const tokenHash = request.nextUrl.searchParams.get("token_hash");
+  const type = request.nextUrl.searchParams.get("type");
 
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-  if (error || !data.user) return confirmationFailed(request);
+  try {
+    const supabase = await createClient();
+    const result = code
+      ? await supabase.auth.exchangeCodeForSession(code)
+      : tokenHash && (type === "signup" || type === "email")
+        ? await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
+        : null;
 
-  const destination = new URL(data.user.app_metadata.role === "admin" ? "/admin" : "/member", request.url);
-  return NextResponse.redirect(destination);
+    if (!result) return confirmationFailed(request);
+    const { data, error } = result;
+    if (error || !data.user) {
+      if (error) console.error("Supabase email confirmation failed.", error);
+      return confirmationFailed(request);
+    }
+
+    const destination = new URL(data.user.app_metadata.role === "admin" ? "/admin" : "/member", request.url);
+    return NextResponse.redirect(destination);
+  } catch (error) {
+    console.error("Could not complete the Supabase email confirmation callback.", error);
+    return confirmationFailed(request);
+  }
 }
 
 function confirmationFailed(request: NextRequest) {
