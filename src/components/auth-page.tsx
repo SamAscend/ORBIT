@@ -9,6 +9,25 @@ import { OrbitLogo } from "@/components/orbit-logo";
 type AuthMode = "member" | "admin";
 type AuthAction = "signin" | "signup";
 
+function authenticationErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "Something went wrong. Please try again.";
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("database error saving new user")) {
+    return "Supabase could not create the member profile. Check that migrations 001–003 ran successfully in this project and that the signup username is not already in use.";
+  }
+  if (normalized.includes("profiles_username_lower_idx") || normalized.includes("duplicate key")) {
+    return "That username is already in use. Choose a different username and try again.";
+  }
+  if (normalized.includes("redirect") || normalized.includes("redirect_to")) {
+    return "Supabase rejected the email confirmation redirect. Add this app URL to Authentication → URL Configuration → Redirect URLs, then try again.";
+  }
+  if (normalized.includes("email not confirmed")) {
+    return "Confirm your email using the latest message from Supabase before signing in. You can request another confirmation email from this page.";
+  }
+  return message;
+}
+
 export function AuthPage() {
   const router = useRouter();
   const configured = Boolean(getSupabaseConfig());
@@ -17,6 +36,12 @@ export function AuthPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmationEmail, setConfirmationEmail] = useState("");
+  const [resendingConfirmation, setResendingConfirmation] = useState(false);
+
+  function confirmationRedirectUrl() {
+    return new URL("/auth/confirm", window.location.origin).toString();
+  }
 
   useEffect(() => {
     try {
@@ -31,17 +56,18 @@ export function AuthPage() {
       if (params.get("mode") === "admin") setMode("admin");
       if (params.get("setup") === "required") setMessage("Set up the Supabase project keys in .env.local before signing in.");
       if (params.get("access") === "membership") setMessage("This account does not currently have an active ORBIT membership. Contact a community administrator.");
+      if (params.get("auth") === "confirmation-failed") setMessage("Email confirmation could not be completed. Request a new confirmation email and use the latest link.");
     }, 0);
 
     if (configured) {
       void Promise.resolve()
-        .then(() => createClient().auth.getUser())
+        .then(() => createClient().auth.getSession())
         .then(({ data, error }) => {
           if (error) {
             console.error("Could not check the current Supabase session.", error);
             return;
           }
-          if (data.user) router.replace(data.user.app_metadata.role === "admin" ? "/admin" : "/member");
+          if (data.session?.user) router.replace(data.session.user.app_metadata.role === "admin" ? "/admin" : "/member");
         })
         .catch((error: unknown) => console.error("Could not check the current Supabase session.", error));
     }
@@ -69,16 +95,21 @@ export function AuthPage() {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { data: { full_name: fullName, username } },
+          options: {
+            data: { full_name: fullName, username },
+            emailRedirectTo: confirmationRedirectUrl(),
+          },
         });
         if (error) throw error;
 
         if (!data.session) {
-          setMessage("Your account is ready. Check your email to confirm it, then sign in.");
+          setConfirmationEmail(email);
+          setMessage("If this address can be registered, Supabase sent a confirmation email. Confirm it before signing in. If you already have an account, sign in instead.");
           setAction("signin");
           return;
         }
 
+        setConfirmationEmail("");
         router.replace("/member");
         router.refresh();
         return;
@@ -88,18 +119,42 @@ export function AuthPage() {
       if (error) throw error;
 
       const actualRole = data.user.app_metadata.role === "admin" ? "admin" : "member";
-      if (mode === "admin" && actualRole !== "admin") {
-        await supabase.auth.signOut();
-        throw new Error("This account is not an administrator. Ask the platform owner to provision admin access.");
+      if (actualRole !== mode) {
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (signOutError) throw signOutError;
+
+        throw new Error(
+          mode === "admin"
+            ? "This is a member account. Sign in from the Member tab instead."
+            : "This is an administrator account. Sign in from the Admin tab instead.",
+        );
       }
 
       router.replace(actualRole === "admin" ? "/admin" : "/member");
       router.refresh();
     } catch (error) {
-      console.error("Authentication request failed.", error);
-      setMessage(error instanceof Error ? error.message : "Something went wrong. Please try again.");
+      setMessage(authenticationErrorMessage(error));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function resendConfirmation() {
+    if (!confirmationEmail) return;
+    setResendingConfirmation(true);
+    setMessage("");
+    try {
+      const { error } = await createClient().auth.resend({
+        type: "signup",
+        email: confirmationEmail,
+        options: { emailRedirectTo: confirmationRedirectUrl() },
+      });
+      if (error) throw error;
+      setMessage("If this address has a pending confirmation, a new email has been sent. Use the latest confirmation link.");
+    } catch (error) {
+      setMessage(authenticationErrorMessage(error));
+    } finally {
+      setResendingConfirmation(false);
     }
   }
 
@@ -121,6 +176,7 @@ export function AuthPage() {
           <span className="eyebrow">{mode === "admin" ? "PLATFORM ADMINISTRATION" : "WELCOME TO YOUR CREW"}</span>
           <h2>{action === "signup" ? "Find your people." : mode === "admin" ? "Admin sign in." : "Good to see you."}</h2>
           <p className="auth-subtitle">{action === "signup" ? "Create your member account and join the ORBIT community." : mode === "admin" ? "Sign in with the administrator account provisioned by the platform owner." : "Sign in to pick up where your crew left off."}</p>
+          {action === "signup" && <button className="auth-back-button" type="button" onClick={() => { setAction("signin"); setMessage(""); setPasswordVisible(false); }}><span aria-hidden="true">←</span> Back to sign in</button>}
 
           <div className="auth-mode-tabs" role="tablist" aria-label="Account type">
             <button type="button" className={mode === "member" ? "selected" : ""} onClick={() => { setMode("member"); setAction("signin"); setMessage(""); setPasswordVisible(false); }}>Member</button>
@@ -133,8 +189,11 @@ export function AuthPage() {
             {action === "signup" && mode === "member" && <label>Full name<input name="fullName" autoComplete="name" required maxLength={100} placeholder="How should we call you?" /></label>}
             {action === "signup" && mode === "member" && <label>Username<span className="username-input-wrap"><span>@</span><input name="username" autoComplete="username" required minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" title="Use 3–24 letters, numbers, or underscores." placeholder="your_username" /></span></label>}
             <label>Email address<input name="email" type="email" autoComplete="email" required placeholder="you@example.com" /></label>
-            <label>Password<span className="password-input-wrap"><input name="password" type={passwordVisible ? "text" : "password"} autoComplete={action === "signup" ? "new-password" : "current-password"} minLength={8} required placeholder={action === "signup" ? "At least 8 characters" : "Enter your password"} /><button className="password-visibility" type="button" aria-label={passwordVisible ? "Hide password" : "Show password"} aria-pressed={passwordVisible} onClick={() => setPasswordVisible((visible) => !visible)}><PasswordVisibilityIcon visible={passwordVisible} /></button></span></label>
-            {message && <div className="auth-message" role="status">{message}</div>}
+            {mode === "admin" && <p className="auth-field-hint">Use the email from the admin account in Supabase Authentication → Users. “ADMIN” is a profile username, not the sign-in email.</p>}
+            <label>Password<span className="password-input-wrap"><input name="password" type={passwordVisible ? "text" : "password"} autoComplete={action === "signup" ? "new-password" : "current-password"} minLength={action === "signup" ? 8 : undefined} required placeholder={action === "signup" ? "At least 8 characters" : "Enter your password"} /><button className="password-visibility" type="button" aria-label={passwordVisible ? "Hide password" : "Show password"} aria-pressed={passwordVisible} onClick={() => setPasswordVisible((visible) => !visible)}><PasswordVisibilityIcon visible={passwordVisible} /></button></span></label>
+            {action === "signup" && <p className="auth-field-hint">After sign-up, confirm your email from the message Supabase sends before signing in.</p>}
+            {message && <div className="auth-message" role="alert">{message}</div>}
+            {confirmationEmail && mode === "member" && action === "signin" && <button className="auth-resend-button" type="button" onClick={() => void resendConfirmation()} disabled={resendingConfirmation}>{resendingConfirmation ? "Sending…" : "Resend confirmation email"}</button>}
             {!configured && <div className="auth-setup-note"><b>Connect Supabase to continue</b><span>Add the project URL and publishable key to <code>.env.local</code>. See the setup steps in README.</span></div>}
             <button className="button button-primary auth-submit" type="submit" disabled={!configured || busy}>{busy ? "One moment..." : action === "signup" ? "Create member account" : mode === "admin" ? "Sign in as admin" : "Sign in"}<span>↗</span></button>
           </form>

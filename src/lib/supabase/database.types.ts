@@ -9,9 +9,9 @@ export type Database = {
   public: {
     Tables: {
       profiles: Table<
-        { id: string; full_name: string; username: string; created_at: string; updated_at: string },
-        { id: string; full_name: string; username: string },
-        { full_name?: string; username?: string; updated_at?: string }
+        { id: string; full_name: string; username: string; is_admin: boolean; created_at: string; updated_at: string },
+        { id: string; full_name: string; username: string; is_admin?: boolean },
+        { full_name?: string; username?: string; is_admin?: boolean; updated_at?: string }
       >;
       communities: Table<
         { id: string; name: string; slug: string; description: string; created_at: string },

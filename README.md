@@ -11,6 +11,7 @@ The ORBIT wordmark and symbol assets are in `public/images/`; the app uses them 
    - [`supabase/migrations/202610270001_initial_community_schema.sql`](./supabase/migrations/202610270001_initial_community_schema.sql) creates the ORBIT community and empty platform tables without example members, events, or quests.
    - [`supabase/migrations/202610270002_rename_community_to_orbit.sql`](./supabase/migrations/202610270002_rename_community_to_orbit.sql) updates a database created from the earlier community name. On a fresh database it is safe to run and makes no data changes.
    - [`supabase/migrations/202610270003_add_usernames.sql`](./supabase/migrations/202610270003_add_usernames.sql) adds unique member usernames and safely fills profiles that already existed.
+   - [`supabase/migrations/202610270004_admin_member_separation.sql`](./supabase/migrations/202610270004_admin_member_separation.sql) keeps admin accounts out of the member directory and counts.
 3. Copy `.env.example` to `.env.local` and fill in the project URL and publishable key from **Supabase → Project Settings → API**.
 4. Start the website:
 
@@ -22,6 +23,8 @@ The ORBIT wordmark and symbol assets are in `public/images/`; the app uses them 
 5. Open [http://localhost:3000](http://localhost:3000).
 
 The project URL and publishable key are safe to use in the browser. Never put a Supabase `service_role` key, database password, or other secret in a `NEXT_PUBLIC_` variable or commit it to source control.
+
+For email confirmation, open **Supabase → Authentication → URL Configuration** and add `http://localhost:3000/auth/confirm` to the Redirect URLs list. For a deployed app, add its exact confirmation URL too, such as `https://your-domain.example/auth/confirm`. Member signup requires email confirmation when the project has email autoconfirm disabled; ORBIT returns users through this callback before opening the member dashboard. Configure a working SMTP provider in Supabase if confirmation messages are not delivered.
 
 ## Member and admin accounts
 
@@ -40,6 +43,7 @@ The project URL and publishable key are safe to use in the browser. Never put a 
   ```
 
 - Replace the example email with the administrator account email, run both statements, then sign out and sign back in to refresh the session. Create or reset the admin password privately in Supabase Auth; never hardcode it in the application or put it in source control. If an account using the intended password has already been shared in chat, reset it before use. Do not assign `role` through user-editable metadata. Admin role checks run on the server and database policies use the signed `app_metadata` claim.
+- Existing Supabase projects that already ran migrations 001–003 should run migration 004 in the SQL Editor. It synchronizes the admin role to the profile, removes admins from member counts/directory, and keeps that flag in sync when an admin is promoted or demoted.
 
 ## Workspace routes
 
@@ -51,7 +55,7 @@ The dashboard starts with empty events, quests, and member content. Its counts a
 
 ## Database and access control
 
-The initial migration creates profiles, the ORBIT community, memberships, events, registrations, quests, submissions, and an XP ledger. The username migration enforces unique case-insensitive usernames. Row-level security separates member data from administrator access. Normal sign-up only creates a member account. Never expose a privileged Supabase key to the browser.
+The initial migration creates profiles, the ORBIT community, memberships, events, registrations, quests, submissions, and an XP ledger. The username migration enforces unique case-insensitive usernames. The admin-role migration synchronizes administrator status to profiles, so admins are excluded from member counts and the member directory. Administrators can create, edit, cancel, and delete events and quests, and suspend or reactivate member access. Row-level security separates member data from administrator access. Normal sign-up only creates a member account. Never expose a privileged Supabase key to the browser.
 
 ## Checks
 
