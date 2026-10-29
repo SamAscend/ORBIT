@@ -9,9 +9,9 @@ export type Database = {
   public: {
     Tables: {
       profiles: Table<
-        { id: string; full_name: string; username: string; is_admin: boolean; created_at: string; updated_at: string },
-        { id: string; full_name: string; username: string; is_admin?: boolean },
-        { full_name?: string; username?: string; is_admin?: boolean; updated_at?: string }
+        { id: string; full_name: string; username: string; avatar_url: string | null; is_admin: boolean; created_at: string; updated_at: string },
+        { id: string; full_name: string; username: string; avatar_url?: string | null; is_admin?: boolean },
+        { full_name?: string; username?: string; avatar_url?: string | null; is_admin?: boolean; updated_at?: string }
       >;
       communities: Table<
         { id: string; name: string; slug: string; description: string; created_at: string },
@@ -19,9 +19,9 @@ export type Database = {
         { name?: string; description?: string }
       >;
       memberships: Table<
-        { id: string; community_id: string; user_id: string; crew_number: number; status: "active" | "suspended" | "left"; created_at: string },
+        { id: string; community_id: string; user_id: string; crew_number: number; status: "active" | "suspended" | "left"; sleep_until: string | null; created_at: string },
         { community_id: string; user_id: string; status?: "active" | "suspended" | "left" },
-        { status?: "active" | "suspended" | "left" }
+        { status?: "active" | "suspended" | "left"; sleep_until?: string | null }
       >;
       events: Table<
         { id: string; community_id: string; title: string; description: string; visibility: "public" | "private"; status: "open" | "cancelled" | "completed"; start_at: string; location: string; capacity: number | null; created_by: string; created_at: string },
@@ -31,6 +31,11 @@ export type Database = {
       event_registrations: Table<
         { id: string; event_id: string; user_id: string; status: "registered" | "cancelled"; created_at: string },
         { event_id: string; user_id: string; status?: "registered" | "cancelled" },
+        { status?: "registered" | "cancelled" }
+      >;
+      quest_registrations: Table<
+        { id: string; quest_id: string; user_id: string; status: "registered" | "cancelled"; created_at: string },
+        { quest_id: string; user_id: string; status?: "registered" | "cancelled" },
         { status?: "registered" | "cancelled" }
       >;
       quests: Table<

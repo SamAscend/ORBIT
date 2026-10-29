@@ -697,3 +697,51 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   .management-list { padding: 5px 12px; }
   .management-heading > .button { flex: 1 1 100%; }
 }
+
+.calendar-panel { padding: 22px; }
+.calendar-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+.calendar-heading h1 { margin: 7px 0 6px; color: #293d32; font-family: Georgia, serif; font-size: 28px; font-weight: 400; }
+.calendar-controls { display: flex; align-items: center; gap: 12px; }
+.calendar-controls b { min-width: 130px; color: #4b5e51; font-family: Georgia, serif; font-size: 15px; font-weight: 400; text-align: center; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); overflow-x: auto; border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+.calendar-weekday { min-width: 96px; padding: 10px 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); color: #8b988e; font-size: 9px; font-weight: 700; text-align: center; text-transform: uppercase; }
+.calendar-day { min-width: 96px; min-height: 112px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: white; padding: 7px; }
+.calendar-day-empty { background: #fafbf9; }
+.calendar-day-today { background: #f5f8f2; }
+.calendar-day-number { display: inline-grid; width: 23px; height: 23px; place-items: center; border-radius: 50%; color: #6c7b6f; font-size: 10px; }
+.calendar-day-today .calendar-day-number { background: var(--green); color: white; }
+.calendar-day-items { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.calendar-event { display: flex; min-width: 0; align-items: center; gap: 4px; overflow: hidden; border: 0; border-radius: 4px; padding: 5px 4px; color: #4e6753; font-size: 9px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.calendar-event span { flex: 0 0 auto; font-size: 8px; font-weight: 800; }
+.calendar-event-event { background: #eaf3eb; }
+.calendar-event-quest { background: #f0edf8; color: #6c6388; }
+.calendar-legend { display: flex; gap: 16px; margin-top: 14px; color: #7d8a80; font-size: 9px; }
+.calendar-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.calendar-legend i { width: 8px; height: 8px; border-radius: 2px; }
+.legend-event { background: #95b396; }
+.legend-quest { background: #aaa0cb; }
+.profile-settings, .sleep-settings { display: grid; max-width: 720px; gap: 15px; margin-bottom: 15px; padding: 22px; }
+.profile-settings h2, .sleep-settings h2 { margin: 7px 0; color: #425649; font-family: Georgia, serif; font-size: 19px; font-weight: 400; }
+.profile-settings .management-field, .sleep-settings .management-field { max-width: 480px; }
+.profile-photo-preview { display: grid; width: 76px; height: 76px; place-items: center; border-radius: 50%; background-color: #e8eee8; background-size: cover; color: #48604d; font-size: 21px; font-weight: 700; }
+.profile-settings small { color: #89958b; font-size: 9px; }
+.sleep-settings { border-color: #e6ebe2; background: #f8faf5; }
+.sleep-settings > .button { justify-self: start; }
+.sleep-notice { margin-bottom: 14px; border: 1px solid #e8eadc; border-radius: 7px; background: #f7f7ef; padding: 12px 14px; color: #747953; font-size: 11px; line-height: 1.5; }
+.member-card-sleeping { filter: grayscale(.8); opacity: .7; }
+.workspace-success { margin-bottom: 13px; border: 1px solid #dfece0; border-radius: 7px; background: #f2f8f1; padding: 11px 13px; color: #527254; font-size: 11px; }
+.participant-list { margin-top: 17px; border-top: 1px solid #edf0ec; padding-top: 13px; }
+.participant-list h3 { margin: 0 0 9px; color: #536558; font-size: 11px; }
+.participant-list ul { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.participant-list li { display: flex; justify-content: space-between; gap: 12px; color: #647469; font-size: 10px; }
+.participant-list li span, .participant-list p { color: #929e95; font-size: 9px; }
+.participant-list p { margin: 0; }
+.participation-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.participation-actions p { margin: 0; color: #987f5b; font-size: 10px; }
+
+@media (max-width: 760px) {
+  .calendar-heading { align-items: flex-start; flex-direction: column; }
+  .calendar-grid { grid-template-columns: repeat(7, minmax(92px, 1fr)); }
+}
+.reset-password-page { display: flex; align-items: center; justify-content: center; }
+.reset-password-panel { width: min(100%, 560px); }

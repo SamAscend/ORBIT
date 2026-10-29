@@ -12,6 +12,7 @@ The ORBIT wordmark and symbol assets are in `public/images/`; the app uses them 
    - [`supabase/migrations/202610270002_rename_community_to_orbit.sql`](./supabase/migrations/202610270002_rename_community_to_orbit.sql) updates a database created from the earlier community name. On a fresh database it is safe to run and makes no data changes.
    - [`supabase/migrations/202610270003_add_usernames.sql`](./supabase/migrations/202610270003_add_usernames.sql) adds unique member usernames and safely fills profiles that already existed.
    - [`supabase/migrations/202610270004_admin_member_separation.sql`](./supabase/migrations/202610270004_admin_member_separation.sql) keeps admin accounts out of the member directory and counts.
+   - [`supabase/migrations/202610270005_calendar_profiles_and_participation.sql`](./supabase/migrations/202610270005_calendar_profiles_and_participation.sql) adds calendar participation, profile photos, and member sleep mode.
 3. Copy `.env.example` to `.env.local` and fill in the project URL and publishable key from **Supabase → Project Settings → API**.
 4. Start the website:
 
@@ -24,7 +25,7 @@ The ORBIT wordmark and symbol assets are in `public/images/`; the app uses them 
 
 The project URL and publishable key are safe to use in the browser. Never put a Supabase `service_role` key, database password, or other secret in a `NEXT_PUBLIC_` variable or commit it to source control.
 
-For email confirmation, open **Supabase → Authentication → URL Configuration** and add `http://localhost:3000/auth/confirm` to the Redirect URLs list. For a deployed app, add its exact confirmation URL too, such as `https://your-domain.example/auth/confirm`. Member signup requires email confirmation when the project has email autoconfirm disabled; ORBIT returns users through this callback before opening the member dashboard. Configure a working SMTP provider in Supabase if confirmation messages are not delivered.
+For email confirmation, open **Supabase → Authentication → URL Configuration** and add `http://localhost:3000/auth/confirm` and `http://localhost:3000/auth/confirm?next=/auth/reset-password` to the Redirect URLs list. For a deployed app, add the corresponding URLs for that exact domain. Member signup requires email confirmation when the project has email autoconfirm disabled; ORBIT returns users through this callback before opening the member dashboard. Configure a working SMTP provider in Supabase if confirmation or password-reset messages are not delivered.
 
 ## Member and admin accounts
 
@@ -49,6 +50,7 @@ For email confirmation, open **Supabase → Authentication → URL Configuration
 
 - `/` — member sign in, member sign up, and the separate admin sign-in entry.
 - `/member` — member dashboard and digital membership card.
+- `/auth/reset-password` — secure password reset destination reached through a Supabase email link.
 - `/admin` — administrator dashboard, member directory, event, and quest areas.
 
 The dashboard starts with empty events, quests, and member content. Its counts are read from Supabase; it does not use seeded demo records or browser-local sample data.
@@ -56,6 +58,8 @@ The dashboard starts with empty events, quests, and member content. Its counts a
 ## Database and access control
 
 The initial migration creates profiles, the ORBIT community, memberships, events, registrations, quests, submissions, and an XP ledger. The username migration enforces unique case-insensitive usernames. The admin-role migration synchronizes administrator status to profiles, so admins are excluded from member counts and the member directory. Administrators can create, edit, cancel, and delete events and quests, and suspend or reactivate member access. Row-level security separates member data from administrator access. Normal sign-up only creates a member account. Never expose a privileged Supabase key to the browser.
+
+Members can view admin-created events and quests in the calendar, join or leave either activity voluntarily, update their name and profile photo, and place their membership in sleep mode for up to 30 days. Administrators can review event and quest participants. Password recovery uses Supabase Auth email delivery; configure the `/auth/confirm` redirect URL in the Supabase project.
 
 ## Checks
 

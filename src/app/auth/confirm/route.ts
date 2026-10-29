@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     const supabase = await createClient();
     const result = code
       ? await supabase.auth.exchangeCodeForSession(code)
-      : tokenHash && (type === "signup" || type === "email")
+      : tokenHash && (type === "signup" || type === "email" || type === "recovery")
         ? await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
         : null;
 
@@ -21,7 +21,11 @@ export async function GET(request: NextRequest) {
       return confirmationFailed(request);
     }
 
-    const destination = new URL(data.user.app_metadata.role === "admin" ? "/admin" : "/member", request.url);
+    const requestedNext = request.nextUrl.searchParams.get("next");
+    const destinationPath = requestedNext === "/auth/reset-password"
+      ? requestedNext
+      : data.user.app_metadata.role === "admin" ? "/admin" : "/member";
+    const destination = new URL(destinationPath, request.url);
     return NextResponse.redirect(destination);
   } catch (error) {
     console.error("Could not complete the Supabase email confirmation callback.", error);

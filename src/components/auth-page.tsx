@@ -7,7 +7,7 @@ import { getSupabaseConfig } from "@/lib/supabase/config";
 import { OrbitLogo } from "@/components/orbit-logo";
 
 type AuthMode = "member" | "admin";
-type AuthAction = "signin" | "signup";
+type AuthAction = "signin" | "signup" | "recovery";
 
 function authenticationErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "Something went wrong. Please try again.";
@@ -85,6 +85,15 @@ export function AuthPage() {
       const formData = new FormData(event.currentTarget);
       const email = String(formData.get("email") ?? "").trim();
       const password = String(formData.get("password") ?? "");
+
+      if (action === "recovery") {
+        const redirectUrl = new URL("/auth/confirm", window.location.origin);
+        redirectUrl.searchParams.set("next", "/auth/reset-password");
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: redirectUrl.toString() });
+        if (error) throw error;
+        setMessage("If an account exists for this address, Supabase sent a password reset email.");
+        return;
+      }
 
       if (action === "signup") {
         const fullName = String(formData.get("fullName") ?? "").trim();
@@ -174,9 +183,9 @@ export function AuthPage() {
       <section className="auth-panel">
         <div className="auth-form-wrap">
           <span className="eyebrow">{mode === "admin" ? "PLATFORM ADMINISTRATION" : "WELCOME TO YOUR CREW"}</span>
-          <h2>{action === "signup" ? "Find your people." : mode === "admin" ? "Admin sign in." : "Good to see you."}</h2>
-          <p className="auth-subtitle">{action === "signup" ? "Create your member account and join the ORBIT community." : mode === "admin" ? "Sign in with the administrator account provisioned by the platform owner." : "Sign in to pick up where your crew left off."}</p>
-          {action === "signup" && <button className="auth-back-button" type="button" onClick={() => { setAction("signin"); setMessage(""); setPasswordVisible(false); }}><span aria-hidden="true">←</span> Back to sign in</button>}
+          <h2>{action === "signup" ? "Find your people." : action === "recovery" ? "Reset your password." : mode === "admin" ? "Admin sign in." : "Good to see you."}</h2>
+          <p className="auth-subtitle">{action === "signup" ? "Create your member account and join the ORBIT community." : action === "recovery" ? "We’ll email you a secure link to choose a new password." : mode === "admin" ? "Sign in with the administrator account provisioned by the platform owner." : "Sign in to pick up where your crew left off."}</p>
+          {(action === "signup" || action === "recovery") && <button className="auth-back-button" type="button" onClick={() => { setAction("signin"); setMessage(""); setPasswordVisible(false); }}><span aria-hidden="true">←</span> Back to sign in</button>}
 
           <div className="auth-mode-tabs" role="tablist" aria-label="Account type">
             <button type="button" className={mode === "member" ? "selected" : ""} onClick={() => { setMode("member"); setAction("signin"); setMessage(""); setPasswordVisible(false); }}>Member</button>
@@ -190,14 +199,15 @@ export function AuthPage() {
             {action === "signup" && mode === "member" && <label>Username<span className="username-input-wrap"><span>@</span><input name="username" autoComplete="username" required minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" title="Use 3–24 letters, numbers, or underscores." placeholder="your_username" /></span></label>}
             <label>Email address<input name="email" type="email" autoComplete="email" required placeholder="you@example.com" /></label>
             {mode === "admin" && <p className="auth-field-hint">Use the email from the admin account in Supabase Authentication → Users. “ADMIN” is a profile username, not the sign-in email.</p>}
-            <label>Password<span className="password-input-wrap"><input name="password" type={passwordVisible ? "text" : "password"} autoComplete={action === "signup" ? "new-password" : "current-password"} minLength={action === "signup" ? 8 : undefined} required placeholder={action === "signup" ? "At least 8 characters" : "Enter your password"} /><button className="password-visibility" type="button" aria-label={passwordVisible ? "Hide password" : "Show password"} aria-pressed={passwordVisible} onClick={() => setPasswordVisible((visible) => !visible)}><PasswordVisibilityIcon visible={passwordVisible} /></button></span></label>
+            {action !== "recovery" && <label>Password<span className="password-input-wrap"><input name="password" type={passwordVisible ? "text" : "password"} autoComplete={action === "signup" ? "new-password" : "current-password"} minLength={action === "signup" ? 8 : undefined} required placeholder={action === "signup" ? "At least 8 characters" : "Enter your password"} /><button className="password-visibility" type="button" aria-label={passwordVisible ? "Hide password" : "Show password"} aria-pressed={passwordVisible} onClick={() => setPasswordVisible((visible) => !visible)}><PasswordVisibilityIcon visible={passwordVisible} /></button></span></label>}
             {action === "signup" && <p className="auth-field-hint">After sign-up, confirm your email from the message Supabase sends before signing in.</p>}
             {message && <div className="auth-message" role="alert">{message}</div>}
             {confirmationEmail && mode === "member" && action === "signin" && <button className="auth-resend-button" type="button" onClick={() => void resendConfirmation()} disabled={resendingConfirmation}>{resendingConfirmation ? "Sending…" : "Resend confirmation email"}</button>}
             {!configured && <div className="auth-setup-note"><b>Connect Supabase to continue</b><span>Add the project URL and publishable key to <code>.env.local</code>. See the setup steps in README.</span></div>}
-            <button className="button button-primary auth-submit" type="submit" disabled={!configured || busy}>{busy ? "One moment..." : action === "signup" ? "Create member account" : mode === "admin" ? "Sign in as admin" : "Sign in"}<span>↗</span></button>
+            <button className="button button-primary auth-submit" type="submit" disabled={!configured || busy}>{busy ? "One moment..." : action === "signup" ? "Create member account" : action === "recovery" ? "Send reset link" : mode === "admin" ? "Sign in as admin" : "Sign in"}<span>↗</span></button>
           </form>
 
+          {mode === "member" && action === "signin" && <button className="auth-resend-button" type="button" onClick={() => { setAction("recovery"); setMessage(""); }}>Forgot your password?</button>}
           {mode === "member" && action === "signin" && <p className="auth-switch-prompt">New around here? <button onClick={() => { setAction("signup"); setMessage(""); }}>Create a member account</button></p>}
           {mode === "admin" && <p className="auth-admin-note">Admin accounts are created by the platform owner. There is no public admin sign-up.</p>}
           <p className="auth-legal">By continuing, you agree to use this community respectfully and keep members’ information private.</p>
