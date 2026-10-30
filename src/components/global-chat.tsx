@@ -11,8 +11,8 @@ type MessageRecord = Pick<
   Database["public"]["Tables"]["chat_messages"]["Row"],
   "id" | "sender_id" | "body" | "is_hidden" | "moderated_at" | "created_at"
 >;
-type ChatMessage = MessageRecord & { authorName: string; avatarUrl: string | null };
-type ChatProfile = { id: string; full_name: string; avatar_url: string | null };
+type ChatMessage = MessageRecord & { authorName: string; authorIsAdmin: boolean; avatarUrl: string | null };
+type ChatProfile = { id: string; full_name: string; avatar_url: string | null; is_admin: boolean };
 type ChatRole = "admin" | "member";
 
 function initials(name: string) {
@@ -31,7 +31,7 @@ async function hydrateMessages(records: MessageRecord[]): Promise<ChatMessage[]>
   const senderIds = [...new Set(records.flatMap((record) => record.sender_id ? [record.sender_id] : []))];
   const supabase = createClient();
   const profilesResult = senderIds.length
-    ? await supabase.from("profiles").select("id, full_name, avatar_url").in("id", senderIds)
+    ? await supabase.from("profiles").select("id, full_name, avatar_url, is_admin").in("id", senderIds)
     : { data: [], error: null };
   if (profilesResult.error) throw profilesResult.error;
 
@@ -40,7 +40,8 @@ async function hydrateMessages(records: MessageRecord[]): Promise<ChatMessage[]>
     const profile = record.sender_id ? profiles.get(record.sender_id) : undefined;
     return {
       ...record,
-      authorName: profile?.full_name ?? "Former member",
+      authorName: profile ? profile.is_admin ? "ADMIN" : profile.full_name : "Former member",
+      authorIsAdmin: profile?.is_admin ?? false,
       avatarUrl: profile?.avatar_url ?? null,
     };
   });
@@ -205,7 +206,7 @@ export function GlobalChat({ role, userId }: { role: ChatRole; userId: string })
               return <article className={`chat-message ${isOwnMessage ? "chat-message-own" : ""} ${message.is_hidden ? "chat-message-hidden" : ""}`} key={message.id}>
                 <span className="chat-avatar" aria-hidden="true" style={message.avatarUrl ? { backgroundImage: `url("${message.avatarUrl}")` } : undefined}>{message.avatarUrl ? "" : initials(message.authorName)}</span>
                 <div className="chat-message-content">
-                  <div className="chat-message-heading"><b>{message.authorName}</b>{message.sender_id === userId && <span className="chat-you-badge">YOU</span>}<time dateTime={message.created_at}>{new Date(message.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</time></div>
+                  <div className="chat-message-heading">{message.authorIsAdmin ? <span className="chat-admin-badge"><span aria-hidden="true">✦</span> ADMIN</span> : <b>{message.authorName}</b>}{message.sender_id === userId && <span className="chat-you-badge">YOU</span>}<time dateTime={message.created_at}>{new Date(message.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</time></div>
                   {message.is_hidden && role !== "admin"
                     ? <p className="chat-hidden-copy">This message was hidden by an administrator.</p>
                     : <p className="chat-message-body">{message.body}</p>}

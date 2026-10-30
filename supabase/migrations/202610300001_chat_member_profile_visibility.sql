@@ -1,4 +1,4 @@
-grant select (id, full_name, avatar_url)
+grant select (id, full_name, avatar_url, is_admin)
   on public.profiles to authenticated;
 
 create or replace function public.can_view_orbit_chat_profile(p_profile_id uuid)
@@ -12,12 +12,23 @@ as $$
     or exists (
       select 1
       from public.memberships as viewer_membership
-      join public.memberships as profile_membership
-        on profile_membership.community_id = viewer_membership.community_id
       where viewer_membership.user_id = (select auth.uid())
         and viewer_membership.status = 'active'
-        and profile_membership.user_id = p_profile_id
-        and profile_membership.status in ('active', 'suspended')
+        and (
+          exists (
+            select 1
+            from public.memberships as profile_membership
+            where profile_membership.community_id = viewer_membership.community_id
+              and profile_membership.user_id = p_profile_id
+              and profile_membership.status in ('active', 'suspended')
+          )
+          or exists (
+            select 1
+            from public.profiles as chat_admin_profile
+            where chat_admin_profile.id = p_profile_id
+              and chat_admin_profile.is_admin
+          )
+        )
     );
 $$;
 
