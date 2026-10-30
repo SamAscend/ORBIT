@@ -56,10 +56,12 @@ export function AuthPage() {
       if (params.get("mode") === "admin") setMode("admin");
       if (params.get("setup") === "required") setMessage("Set up the Supabase project keys in .env.local before signing in.");
       if (params.get("access") === "membership") setMessage("This account does not currently have an active ORBIT membership. Contact a community administrator.");
+      if (params.get("access") === "paused") setMessage("Your ORBIT membership is paused. Contact an administrator if you would like to reactivate it.");
       if (params.get("auth") === "confirmation-failed") setMessage("Email confirmation could not be completed. Request a new confirmation email and use the latest link.");
+      if (params.get("account") === "closed") setMessage("Your ORBIT account has been closed and its live membership verification has been revoked.");
     }, 0);
 
-    if (configured) {
+    if (configured && new URLSearchParams(window.location.search).get("account") !== "closed") {
       void Promise.resolve()
         .then(() => createClient().auth.getSession())
         .then(({ data, error }) => {

@@ -1,20 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { GlobalChat } from "@/components/global-chat";
+import { QRCodeSVG } from "qrcode.react";
 import type { Database } from "@/lib/supabase/database.types";
 import type { User } from "@supabase/supabase-js";
 import { OrbitLogo, OrbitSymbol } from "@/components/orbit-logo";
 
 type WorkspaceRole = "admin" | "member";
-type Counts = { members: number; events: number; quests: number; xp: number; crewNumber: number | null };
-type ViewName = "Overview" | "Calendar" | "Events" | "Quests" | "Members" | "Membership" | "Profile";
+type Counts = { members: number; events: number; quests: number; xp: number; crewNumber: number | null; membershipStatus: MembershipRecord["status"] | null; verificationToken: string | null };
+type ViewName = "Overview" | "Calendar" | "Events" | "Quests" | "Members" | "Membership" | "Profile" | "Chat";
 type Participant = { userId: string; fullName: string; username: string };
 type CommunityEvent = Pick<Database["public"]["Tables"]["events"]["Row"], "id" | "title" | "description" | "visibility" | "start_at" | "location" | "capacity" | "status"> & { registered?: boolean; participants?: Participant[] };
 type CommunityQuest = Pick<Database["public"]["Tables"]["quests"]["Row"], "id" | "title" | "description" | "xp_reward" | "goal" | "deadline"> & { registered?: boolean; participants?: Participant[] };
-type MembershipRecord = Pick<Database["public"]["Tables"]["memberships"]["Row"], "user_id" | "crew_number" | "status" | "created_at" | "sleep_until">;
+type MembershipRecord = Pick<Database["public"]["Tables"]["memberships"]["Row"], "user_id" | "crew_number" | "status" | "created_at" | "sleep_until" | "verification_token">;
 type DirectoryMember = { userId: string; fullName: string; username: string; crewNumber: number; status: string; joinedAt: string; sleepUntil: string | null };
 type ProfileData = { fullName: string; username: string; avatarUrl: string | null };
 type WorkspaceData = { events: CommunityEvent[]; quests: CommunityQuest[]; members: DirectoryMember[] };
@@ -40,7 +42,7 @@ function workspaceLoadErrorMessage(error: unknown) {
     || normalizedMessage.includes("schema cache")
     || normalizedMessage.includes("does not exist")
   ) {
-    return "Database schema is missing the new ORBIT calendar/profile features. Run migration 202610270005_calendar_profiles_and_participation.sql in the Supabase SQL Editor, then reload this page.";
+    return "The ORBIT database is missing a required migration. Run migrations 202610270005_calendar_profiles_and_participation.sql, 202610270006_membership_lifecycle_and_verification.sql, and 202610270007_global_chat.sql in the Supabase SQL Editor, then reload this page.";
   }
 
   return message;
@@ -52,7 +54,15 @@ function greetingFor(hour: number) {
   return "Good evening";
 }
 
-function Icon({ name }: { name: "grid" | "calendar" | "flag" | "users" | "card" | "settings" | "logout" | "eye" }) {
+function subscribeToPageOrigin() {
+  return () => {};
+}
+
+function getPageOrigin() {
+  return window.location.origin;
+}
+
+function Icon({ name }: { name: "grid" | "calendar" | "flag" | "users" | "card" | "settings" | "logout" | "eye" | "chat" }) {
   const paths: Record<typeof name, React.ReactNode> = {
     grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
     calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18" /></>,
@@ -62,6 +72,7 @@ function Icon({ name }: { name: "grid" | "calendar" | "flag" | "users" | "card" 
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19 13.5v-3l-2-.7a6 6 0 0 0-.6-1.4l1-1.8-2.1-2.1-1.8 1a6 6 0 0 0-1.5-.6l-.6-2h-3l-.7 2a6 6 0 0 0-1.4.6l-1.8-1-2.1 2.1 1 1.8a6 6 0 0 0-.6 1.5l-2 .6v3l2 .7a6 6 0 0 0 .6 1.4l-1 1.8 2.1 2.1 1.8-1a6 6 0 0 0 1.5.6l.6 2h3l.7-2a6 6 0 0 0 1.4-.6l1.8 1 2.1-2.1-1-1.8a6 6 0 0 0 .6-1.5z" transform="translate(2 1) scale(.83)" /></>,
     logout: <><path d="M10 17l5-5-5-5M15 12H3" /><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6" /></>,
     eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>,
+    chat: <><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H6l-3 2v-6a7.5 7.5 0 1 1 17-3.5Z" /><path d="M8 11h.01M12 11h.01M16 11h.01" /></>,
   };
   return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
@@ -70,7 +81,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
   const router = useRouter();
   const [view, setView] = useState<ViewName>("Overview");
   const [greeting, setGreeting] = useState("Welcome");
-  const [counts, setCounts] = useState<Counts>({ members: 0, events: 0, quests: 0, xp: 0, crewNumber: null });
+  const [counts, setCounts] = useState<Counts>({ members: 0, events: 0, quests: 0, xp: 0, crewNumber: null, membershipStatus: null, verificationToken: null });
   const [workspaceData, setWorkspaceData] = useState<WorkspaceData>({ events: [], quests: [], members: [] });
   const [profileUsername, setProfileUsername] = useState("");
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
@@ -108,8 +119,8 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
       try {
         const supabase = createClient();
         const membershipQuery = role === "admin"
-          ? supabase.from("memberships").select("user_id, crew_number, status, created_at, sleep_until").neq("status", "left").order("created_at", { ascending: false }).limit(1000)
-          : supabase.from("memberships").select("user_id, crew_number, status, created_at, sleep_until", { count: "exact" }).eq("user_id", user.id).eq("status", "active").limit(1);
+          ? supabase.from("memberships").select("user_id, crew_number, status, created_at, sleep_until, verification_token").neq("status", "left").order("created_at", { ascending: false }).limit(1000)
+          : supabase.from("memberships").select("user_id, crew_number, status, created_at, sleep_until, verification_token", { count: "exact" }).eq("user_id", user.id).limit(1);
         const [membershipResult, eventResult, questResult] = await Promise.all([
           membershipQuery,
           supabase.from("events").select("id, title, description, visibility, start_at, location, capacity, status", { count: "exact" }).order("start_at", { ascending: true }).limit(1000),
@@ -122,6 +133,8 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
         let xp = 0;
         const memberships = membershipResult.data as MembershipRecord[];
         let crewNumber: number | null = null;
+        let membershipStatus: MembershipRecord["status"] | null = null;
+        let verificationToken: string | null = null;
         let directoryMembers: DirectoryMember[] = [];
         let profile: ProfileData | null = null;
         let memberEventRegistrations = new Set<string>();
@@ -167,6 +180,8 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
         }
         if (role === "member") {
           crewNumber = memberships[0]?.crew_number ?? null;
+          membershipStatus = memberships[0]?.status ?? null;
+          verificationToken = memberships[0]?.verification_token ?? null;
           const [profileResult, xpResult, eventRegistrationsResult, questRegistrationsResult] = await Promise.all([
             supabase.from("profiles").select("full_name, username, avatar_url").eq("id", user.id).maybeSingle(),
             supabase.from("xp_ledger").select("points").eq("user_id", user.id),
@@ -193,6 +208,8 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
             quests: questResult.count ?? 0,
             xp,
             crewNumber,
+            membershipStatus,
+            verificationToken,
           });
           setWorkspaceData({
             events: eventResult.data.map((communityEvent) => ({
@@ -304,18 +321,20 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
     }
   }
 
-  const adminNavigation: { label: ViewName; icon: "grid" | "calendar" | "flag" | "users" }[] = [
+  const adminNavigation: { label: ViewName; icon: "grid" | "calendar" | "flag" | "users" | "chat" }[] = [
     { label: "Overview", icon: "grid" },
     { label: "Calendar", icon: "calendar" },
     { label: "Events", icon: "calendar" },
     { label: "Quests", icon: "flag" },
     { label: "Members", icon: "users" },
+    { label: "Chat", icon: "chat" },
   ];
-  const memberNavigation: { label: ViewName; icon: "grid" | "calendar" | "flag" | "card" | "settings" }[] = [
+  const memberNavigation: { label: ViewName; icon: "grid" | "calendar" | "flag" | "card" | "settings" | "chat" }[] = [
     { label: "Overview", icon: "grid" },
     { label: "Calendar", icon: "calendar" },
     { label: "Events", icon: "calendar" },
     { label: "Quests", icon: "flag" },
+    { label: "Chat", icon: "chat" },
     { label: "Membership", icon: "card" },
     { label: "Profile", icon: "settings" },
   ];
@@ -323,7 +342,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
   const activeView = view;
 
   return (
-    <div className="workspace-shell">
+    <div className={`workspace-shell ${role === "member" && activeView === "Membership" ? "print-membership-card" : ""}`}>
       <aside className="workspace-sidebar">
         <Link className="brand-lockup" href={role === "admin" ? "/admin" : "/member"}><OrbitLogo className="sidebar-orbit-logo" /></Link>
         <div className="community-switcher"><span className="community-avatar"><OrbitSymbol className="community-orbit-symbol" /></span><span className="community-switch-copy"><b>ORBIT</b><small>{role === "admin" ? "Admin workspace" : "Your community"}</small></span></div>
@@ -355,8 +374,9 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
             ? <QuestManager quests={workspaceData.quests} adminId={user.id} onChanged={() => setRefreshKey((key) => key + 1)} onViewDetail={(item) => setSelectedDetail({ kind: "quest", item })} />
             : <EmptyWorkspaceSection role={role} kind="quests" count={counts.quests} loading={loading} quests={workspaceData.quests} onViewDetail={setSelectedDetail} />)}
           {activeView === "Members" && role === "admin" && <EmptyWorkspaceSection role={role} kind="members" count={counts.members} loading={loading} members={workspaceData.members} onToggleMemberAccess={toggleMemberAccess} memberActionId={memberActionId} />}
-          {activeView === "Membership" && role === "member" && <MemberCard counts={counts} loading={loading} name={displayName} email={user.email ?? ""} sleepUntil={sleepUntil} />}
+          {activeView === "Membership" && role === "member" && <MemberCard counts={counts} loading={loading} name={displayName} sleepUntil={sleepUntil} />}
           {activeView === "Profile" && role === "member" && profileData && <MemberProfile profile={profileData} sleepUntil={sleepUntil} userId={user.id} onProfileSaved={updateProfile} onSleepModeChanged={updateSleepMode} />}
+          {activeView === "Chat" && <GlobalChat role={role} userId={user.id} />}
         </div>
         {selectedDetail && <CommunityDetailDialog detail={selectedDetail} role={role} sleeping={Boolean(sleepUntil && new Date(sleepUntil) > new Date())} onToggleParticipation={() => void toggleParticipation(selectedDetail)} onClose={() => setSelectedDetail(null)} />}
         <footer className="page-footer"><span>BUILT FOR THE MILES AHEAD <b>✳</b></span><span>ORBIT · Community, in motion.</span></footer>
@@ -387,10 +407,27 @@ function MemberOverview({ counts, loading, name, email, events, quests, onNaviga
   </>;
 }
 
-function MemberCard({ counts, loading, name, email, sleepUntil }: { counts: Counts; loading: boolean; name: string; email: string; sleepUntil: string | null }) {
+function MemberCard({ counts, loading, name, sleepUntil }: { counts: Counts; loading: boolean; name: string; sleepUntil: string | null }) {
   const crewId = counts.crewNumber === null ? "—" : `MZ-${String(counts.crewNumber).padStart(4, "0")}`;
   const sleeping = Boolean(sleepUntil && new Date(sleepUntil) > new Date());
-  return <><section className="page-heading"><div><span className="eyebrow">YOUR COMMUNITY, YOUR CARD</span><h1>Membership</h1><p className="page-intro">Your place in the crew, always close at hand.</p></div></section>{sleeping && <div className="sleep-notice" role="status">Sleep mode is on until {new Date(sleepUntil!).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}. Your membership card is hibernating.</div>}<div className={`member-card ${sleeping ? "member-card-sleeping" : ""}`}><div className="member-card-top"><div className="brand-lockup brand-light"><OrbitLogo className="card-orbit-logo" /></div><span className="card-chip">{sleeping ? "HIBERNATING" : "CREW MEMBER"}</span></div><div className="card-member-info"><span className="eyebrow">GOOD TO HAVE YOU HERE</span><h2>{name}</h2><span>{email}</span></div><div className="card-footer"><div><span className="eyebrow">YOUR CREW ID</span><b>{loading ? "…" : crewId}</b></div><span className="member-card-mark">✳</span></div></div></>;
+  const origin = useSyncExternalStore(subscribeToPageOrigin, getPageOrigin, () => "");
+  const verificationUrl = origin && counts.verificationToken
+    ? new URL(`/verify/${counts.verificationToken}`, origin).toString()
+    : "";
+
+  const statusLabel = counts.membershipStatus === "active"
+    ? "ACTIVE MEMBER"
+    : counts.membershipStatus === "suspended"
+      ? "SUSPENDED"
+      : counts.membershipStatus === "left"
+        ? "MEMBERSHIP ENDED"
+        : "STATUS UNAVAILABLE";
+
+  function printCard() {
+    window.print();
+  }
+
+  return <><section className="page-heading"><div><span className="eyebrow">YOUR COMMUNITY, YOUR CARD</span><h1>Membership</h1><p className="page-intro">Keep a copy on your device or print a wallet-sized card.</p></div></section>{sleeping && <div className="sleep-notice" role="status">Sleep mode is on until {new Date(sleepUntil!).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}. Your membership remains active, but participation is paused.</div>}<section className="membership-print-area" aria-label="Membership card"><div className="membership-card-actions"><p>Print it, or choose “Save as PDF” in your device’s print dialog to keep an offline copy.</p><button type="button" className="button button-primary" onClick={printCard} disabled={loading || counts.crewNumber === null || !verificationUrl}>Print / Save as PDF</button></div><div className="member-card"><div className="member-card-top"><div className="brand-lockup brand-light"><OrbitLogo className="card-orbit-logo" /></div><span className="card-chip">{loading ? "LOADING" : statusLabel}</span></div><div className="card-member-info"><span className="eyebrow">GOOD TO HAVE YOU HERE</span><h2>{name}</h2><span>ORBIT COMMUNITY</span></div><div className="member-card-qr">{verificationUrl ? <QRCodeSVG value={verificationUrl} size={88} level="M" title="Scan to verify this ORBIT membership" /> : <span>VERIFY<br />ONLINE</span>}<small>SCAN TO VERIFY</small></div><div className="card-footer"><div><span className="eyebrow">YOUR CREW ID</span><b>{loading ? "…" : crewId}</b></div><span className="member-card-mark">✳</span></div><div className="member-card-disclaimer">STATUS MAY CHANGE · VERIFY ONLINE</div></div><p className="card-note">A saved or printed card is an offline snapshot. Scan its QR code for current status; inactive or ended memberships will not verify.</p></section></>;
 }
 
 function CalendarView({ events, quests, onViewDetail }: { events: CommunityEvent[]; quests: CommunityQuest[]; onViewDetail: (detail: CommunityDetail) => void }) {
@@ -440,6 +477,10 @@ function MemberProfile({ profile, sleepUntil, userId, onProfileSaved, onSleepMod
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [leaving, setLeaving] = useState(false);
+  const [leaveFormOpen, setLeaveFormOpen] = useState(false);
+  const [leavePassword, setLeavePassword] = useState("");
+  const [leaveConfirmation, setLeaveConfirmation] = useState("");
   const sleeping = Boolean(sleepUntil && new Date(sleepUntil) > new Date());
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
@@ -518,6 +559,63 @@ function MemberProfile({ profile, sleepUntil, userId, onProfileSaved, onSleepMod
     }
   }
 
+  async function pauseMembership() {
+    if (!window.confirm("Pause your ORBIT membership? Your account and progress will stay saved, but you will lose access until an administrator reactivates your membership.")) return;
+    setError("");
+    setMessage("");
+    setBusy(true);
+    try {
+      const supabase = createClient();
+      const { error: pauseError } = await supabase.rpc("pause_own_membership");
+      if (pauseError) throw pauseError;
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) {
+        console.error("Membership was paused, but the member could not be signed out.", signOutError);
+        setError("Your membership is paused, but we could not sign you out. Please sign out manually. An administrator can reactivate your membership.");
+        return;
+      }
+      window.location.replace("/?access=paused");
+    } catch (pauseError) {
+      console.error("Could not pause the member's ORBIT membership.", pauseError);
+      setError(pauseError instanceof Error ? pauseError.message : "Could not pause your membership.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function leaveOrbit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (leaveConfirmation !== "LEAVE ORBIT") {
+      setError('Type "LEAVE ORBIT" to confirm permanent account closure.');
+      return;
+    }
+    if (!leavePassword) {
+      setError("Enter your current password to confirm account closure.");
+      return;
+    }
+
+    setLeaving(true);
+    try {
+      const response = await fetch("/api/membership/leave", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation: leaveConfirmation, password: leavePassword }),
+      });
+      const result = await response.json() as { error?: string; success?: boolean };
+      if (!response.ok || !result.success) throw new Error(result.error ?? "Your account could not be closed.");
+
+      const { error: signOutError } = await createClient().auth.signOut();
+      if (signOutError) console.error("The account was closed, but the browser session could not be cleared.", signOutError);
+      window.location.replace("/?account=closed");
+    } catch (leaveError) {
+      console.error("Could not close the ORBIT account.", leaveError);
+      setError(leaveError instanceof Error ? leaveError.message : "Your account could not be closed.");
+      setLeaving(false);
+    }
+  }
+
   return <>
     <section className="page-heading"><div><span className="eyebrow">YOUR ACCOUNT, YOUR SETTINGS</span><h1>Personal profile</h1><p className="page-intro">Update how you appear to your crew and manage your membership status.</p></div></section>
     {(error || message) && <div className={error ? "workspace-error" : "workspace-success"} role={error ? "alert" : "status"}>{error || message}</div>}
@@ -534,9 +632,23 @@ function MemberProfile({ profile, sleepUntil, userId, onProfileSaved, onSleepMod
       <button className="button button-secondary" type="submit" disabled={busy}>{busy ? "Updating…" : "Update password"}</button>
     </form>
     <section className="workspace-panel sleep-settings">
-      <div><span className="eyebrow">MEMBERSHIP HIBERNATION</span><h2>{sleeping ? "Sleep mode is active" : "Take a break when you need one"}</h2><p className="page-intro">{sleeping ? `Your membership card is inactive until ${new Date(sleepUntil!).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}. You can wake it up at any time.` : "While asleep, events and quests are hidden and you cannot join them. Your account and progress remain safe."}</p></div>
+      <div><span className="eyebrow">MEMBERSHIP HIBERNATION</span><h2>{sleeping ? "Sleep mode is active" : "Take a break when you need one"}</h2><p className="page-intro">{sleeping ? `Your membership remains active until ${new Date(sleepUntil!).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}, but participation is paused. You can wake it up at any time.` : "While asleep, events and quests are hidden and you cannot join them. Your account and progress remain safe."}</p></div>
       {!sleeping && <label className="management-field">Sleep duration<select value={days} onChange={(event) => setDays(event.target.value)}><option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option></select></label>}
       <button className={sleeping ? "button button-primary" : "button button-secondary"} type="button" onClick={() => void toggleSleepMode()} disabled={busy}>{busy ? "Updating…" : sleeping ? "Wake membership" : "Enter sleep mode"}</button>
+    </section>
+    <section className="workspace-panel membership-exit-settings">
+      <div><span className="eyebrow">MEMBERSHIP OPTIONS</span><h2>Need a longer break?</h2><p>Pause your membership to keep your account and progress. An administrator can reactivate it when you are ready.</p></div>
+      <button className="button button-secondary" type="button" onClick={() => void pauseMembership()} disabled={busy || leaving}>{busy ? "Pausing…" : "Pause membership"}</button>
+    </section>
+    <section className="workspace-panel membership-exit-settings membership-leave-settings">
+      <div><span className="eyebrow">PERMANENT ACCOUNT CLOSURE</span><h2>Leave ORBIT</h2><p>Closing your account permanently removes your profile, membership, participation history, progress, and profile photo from the live ORBIT database. This cannot be undone by an administrator. A copy already saved to a device cannot be remotely deleted, but its live verification will stop working.</p><p>If you only lost access to your account, use password recovery instead. Your saved data stays in ORBIT unless you choose to close the account.</p></div>
+      {!leaveFormOpen
+        ? <button className="button button-danger" type="button" onClick={() => { setError(""); setLeaveFormOpen(true); }} disabled={busy}>Continue to account closure</button>
+        : <form className="leave-account-form" onSubmit={leaveOrbit}>
+            <label className="management-field">Current password<input type="password" autoComplete="current-password" value={leavePassword} onChange={(event) => setLeavePassword(event.target.value)} required /></label>
+            <label className="management-field">Type LEAVE ORBIT to confirm<input value={leaveConfirmation} onChange={(event) => setLeaveConfirmation(event.target.value)} autoComplete="off" required /></label>
+            <div className="management-form-actions"><button className="button button-secondary" type="button" onClick={() => { setLeaveFormOpen(false); setLeavePassword(""); setLeaveConfirmation(""); setError(""); }} disabled={leaving}>Cancel</button><button className="button button-danger" type="submit" disabled={leaving}>{leaving ? "Closing account…" : "Permanently close account"}</button></div>
+          </form>}
     </section>
   </>;
 }

@@ -317,6 +317,15 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .card-footer .eyebrow { color: #b3c9b4; font-size: 8px; }
 .card-footer b { font-size: 12px; font-weight: 600; letter-spacing: .09em; }
 .member-card-mark { color: #b3c99e; font-size: 32px; }
+.member-card-disclaimer { position: absolute; bottom: 6px; left: 24px; color: #b3c9b4; font-size: 7px; letter-spacing: .08em; }
+.member-card-qr { position: absolute; z-index: 2; right: 22px; bottom: 53px; display: flex; flex-direction: column; align-items: center; gap: 5px; color: #d6e3d4; font-size: 7px; letter-spacing: .08em; }
+.member-card-qr svg { display: block; border-radius: 4px; background: #fff; padding: 4px; }
+.member-card-qr > span { display: grid; width: 88px; height: 88px; place-items: center; border: 1px solid #ffffff52; border-radius: 4px; text-align: center; }
+.membership-print-area { width: min(560px, 100%); margin-top: 8px; }
+.membership-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.membership-card-actions p { max-width: 340px; margin: 0; color: #89978c; font-size: 10px; line-height: 1.6; }
+.membership-card-actions .button { flex: 0 0 auto; }
+.membership-print-area .member-card { width: 100%; }
 .card-note { display: flex; align-items: flex-start; gap: 9px; margin-top: 11px; color: #89978c; font-size: 9px; line-height: 1.55; }
 .card-note svg { flex: 0 0 auto; color: #819b7b; }
 .membership-details { padding: 23px; }
@@ -618,7 +627,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .community-detail-list dd { margin: 0; color: #526357; font-weight: 600; text-align: right; }
 .workspace-content > .page-heading { align-items: flex-start; }
 .workspace-content > .page-heading h1 { font-family: Georgia, serif; }
-.workspace-content > .member-card { width: min(560px, 100%); margin-top: 8px; }
+
 
 @media (max-width: 1100px) {
   .workspace-sidebar { width: 220px; }
@@ -727,8 +736,16 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .profile-settings small { color: #89958b; font-size: 9px; }
 .sleep-settings { border-color: #e6ebe2; background: #f8faf5; }
 .sleep-settings > .button { justify-self: start; }
+.membership-exit-settings { display: grid; max-width: 720px; gap: 14px; margin-bottom: 15px; padding: 22px; }
+.membership-exit-settings h2 { margin: 7px 0; color: #425649; font-family: Georgia, serif; font-size: 19px; font-weight: 400; }
+.membership-exit-settings p { max-width: 620px; margin: 0; color: #89958b; font-size: 10px; line-height: 1.65; }
+.membership-exit-settings > .button { justify-self: start; }
+.membership-leave-settings { border-color: #efdfda; }
+.membership-leave-settings .eyebrow { color: #a8766b; }
+.leave-account-form { display: grid; max-width: 480px; gap: 13px; }
+.leave-account-form .management-form-actions { justify-content: flex-start; margin-top: 0; }
+.leave-account-form .button-danger { margin-left: auto; }
 .sleep-notice { margin-bottom: 14px; border: 1px solid #e8eadc; border-radius: 7px; background: #f7f7ef; padding: 12px 14px; color: #747953; font-size: 11px; line-height: 1.5; }
-.member-card-sleeping { filter: grayscale(.8); opacity: .7; }
 .workspace-success { margin-bottom: 13px; border: 1px solid #dfece0; border-radius: 7px; background: #f2f8f1; padding: 11px 13px; color: #527254; font-size: 11px; }
 .participant-list { margin-top: 17px; border-top: 1px solid #edf0ec; padding-top: 13px; }
 .participant-list h3 { margin: 0 0 9px; color: #536558; font-size: 11px; }
@@ -739,9 +756,113 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .participation-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
 .participation-actions p { margin: 0; color: #987f5b; font-size: 10px; }
 
+@page member-card {
+  size: 85.6mm 54mm;
+  margin: 0;
+}
+
+@media print {
+  .print-membership-card { page: member-card; min-height: 0; margin: 0; background: #fff; }
+  .print-membership-card .workspace-sidebar,
+  .print-membership-card .workspace-topbar,
+  .print-membership-card .page-footer { display: none !important; }
+  .print-membership-card .workspace-main { min-height: 0; margin: 0; }
+  .print-membership-card .workspace-content { width: 85.6mm; min-height: 0; margin: 0; padding: 0; }
+  .print-membership-card .workspace-content > * { display: none !important; }
+  .print-membership-card .workspace-content > .membership-print-area { display: block !important; width: 85.6mm; margin: 0; }
+  .membership-card-actions,
+  .membership-print-area > .card-note { display: none !important; }
+  .membership-print-area .member-card {
+    width: 85.6mm;
+    height: 54mm;
+    min-height: 54mm;
+    border-radius: 0;
+    padding: 5mm 6mm;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .membership-print-area .card-chip { top: 5mm; right: 6mm; font-size: 6pt; }
+  .membership-print-area .card-orbit-logo { width: 27mm; }
+  .membership-print-area .card-member-info { margin-top: 8mm; }
+  .membership-print-area .card-member-info { max-width: 60%; }
+  .membership-print-area .card-member-info h2 { margin: 2mm 0 1mm; font-size: 14pt; overflow-wrap: anywhere; }
+  .membership-print-area .card-member-info > span:last-child { font-size: 7pt; }
+  .membership-print-area .member-card-qr { right: 6mm; bottom: 14mm; gap: 1mm; font-size: 4pt; }
+  .membership-print-area .member-card-qr svg { width: 18mm; height: 18mm; padding: 1mm; }
+  .membership-print-area .member-card-qr > span { width: 18mm; height: 18mm; font-size: 5pt; }
+  .membership-print-area .card-footer { right: 6mm; bottom: 8mm; left: 6mm; }
+  .membership-print-area .card-footer .member-card-mark { display: none; }
+  .membership-print-area .card-footer .eyebrow { font-size: 5pt; }
+  .membership-print-area .card-footer b { font-size: 8pt; }
+  .membership-print-area .member-card-mark { font-size: 22pt; }
+  .membership-print-area .member-card-disclaimer { bottom: 2mm; left: 6mm; font-size: 4.5pt; }
+}
+
 @media (max-width: 760px) {
   .calendar-heading { align-items: flex-start; flex-direction: column; }
   .calendar-grid { grid-template-columns: repeat(7, minmax(92px, 1fr)); }
 }
 .reset-password-page { display: flex; align-items: center; justify-content: center; }
 .reset-password-panel { width: min(100%, 560px); }
+.verification-page { display: grid; min-height: 100vh; place-items: center; background: #f6f7f3; padding: 24px; }
+.verification-panel { width: min(100%, 480px); border: 1px solid #e5ebe4; border-radius: 12px; background: #fff; padding: 30px; }
+.verification-brand { margin-bottom: 28px; }
+.verification-logo { display: block; width: 130px; }
+.verification-panel h1 { margin: 12px 0 8px; color: #405447; font-family: Georgia, serif; font-size: 27px; font-weight: 400; }
+.verification-panel > p { margin: 0; color: #7d8b81; font-size: 12px; line-height: 1.65; }
+.verification-status { display: inline-flex; border-radius: 20px; padding: 7px 10px; font-size: 9px; font-weight: 700; letter-spacing: .1em; }
+.verification-status.valid { background: #edf4ec; color: #4e7552; }
+.verification-status.invalid { background: #f9eeeb; color: #a46155; }
+.verification-panel dl { display: grid; gap: 0; margin: 21px 0 28px; }
+.verification-panel dl > div { display: flex; justify-content: space-between; gap: 16px; border-top: 1px solid #eff1ee; padding: 12px 0; font-size: 11px; }
+.verification-panel dt { color: #8d9990; }
+.verification-panel dd { margin: 0; color: #526357; font-weight: 700; text-align: right; }
+.verification-panel > small { display: block; border-top: 1px solid #eff1ee; padding-top: 15px; color: #9aa49c; font-size: 9px; }
+.global-chat-page { display: grid; min-height: 580px; grid-template-rows: auto minmax(0, 1fr); gap: 16px; }
+.global-chat-heading { align-items: center; }
+.chat-live-status { display: inline-flex; align-items: center; gap: 7px; color: #9a8b71; font-size: 9px; font-weight: 700; }
+.chat-live-status i { width: 7px; height: 7px; border-radius: 50%; background: #d7b26a; }
+.chat-live-status.connected { color: #638266; }
+.chat-live-status.connected i { background: #85aa82; box-shadow: 0 0 0 3px #edf4ec; }
+.global-chat-panel { display: grid; min-height: 480px; grid-template-rows: minmax(250px, 1fr) auto; gap: 15px; padding: 18px; }
+.chat-message-list { display: flex; min-height: 250px; max-height: min(62vh, 680px); flex-direction: column; gap: 14px; overflow-y: auto; padding: 4px 5px 12px 0; }
+.chat-load-older { align-self: center; border: 0; background: transparent; padding: 8px; color: #66836a; font-size: 10px; font-weight: 700; cursor: pointer; }
+.chat-load-older:disabled { cursor: wait; }
+.chat-empty-state { display: flex; min-height: 250px; flex-direction: column; align-items: center; justify-content: center; color: #87958a; text-align: center; }
+.chat-empty-state > span { color: #8ca187; font-size: 24px; }
+.chat-empty-state b { margin: 8px 0 4px; color: #56665a; font-family: Georgia, serif; font-size: 16px; font-weight: 400; }
+.chat-empty-state p { margin: 0; font-size: 10px; }
+.chat-message { display: flex; width: 85%; align-items: flex-start; gap: 10px; padding: 7px 5px; }
+.chat-message:not(.chat-message-own) { align-self: flex-end; flex-direction: row-reverse; }
+.chat-avatar { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border-radius: 50%; background-color: #e8eee8; background-position: center; background-size: cover; color: #526a55; font-size: 10px; font-weight: 700; }
+.chat-message-content { min-width: 0; flex: 1; }
+.chat-message-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 1px 0 5px; }
+.chat-message:not(.chat-message-own) .chat-message-heading { justify-content: flex-end; }
+.chat-message-heading b { color: #526357; font-size: 10px; }
+.chat-message-heading time { color: #a0aaa2; font-size: 8px; }
+.chat-you-badge { border-radius: 9px; background: #edf4ec; padding: 2px 5px; color: #638266; font-size: 7px; font-weight: 700; letter-spacing: .06em; }
+.chat-message-body { margin: 0; color: #66756a; font-size: 11px; line-height: 1.65; overflow-wrap: anywhere; white-space: pre-wrap; }
+.chat-message:not(.chat-message-own) .chat-message-body,
+.chat-message:not(.chat-message-own) .chat-hidden-copy,
+.chat-message:not(.chat-message-own) .chat-hidden-label { text-align: right; }
+.chat-message-hidden .chat-message-body { color: #9a8178; }
+.chat-hidden-copy { margin: 0; color: #a3786e; font-size: 10px; font-style: italic; }
+.chat-hidden-label { display: block; margin-top: 5px; color: #a3786e; font-size: 8px; }
+.chat-moderate-button { flex: 0 0 auto; border: 1px solid #efdfda; border-radius: 6px; background: #fff8f6; padding: 5px 8px; color: #a46155; font-size: 8px; font-weight: 700; cursor: pointer; }
+.chat-moderate-button.restore { border-color: #dfece0; background: #f2f8f1; color: #527254; }
+.chat-moderate-button:disabled { opacity: .6; cursor: wait; }
+.chat-error { margin: 0; }
+.chat-compose-form { display: grid; gap: 9px; border-top: 1px solid #eff1ee; padding-top: 14px; }
+.chat-compose-form .management-field textarea { min-height: 68px; resize: vertical; }
+.chat-compose-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.chat-compose-footer small { color: #9aa49c; font-size: 8px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+
+@media (max-width: 760px) {
+  .global-chat-page { min-height: 520px; }
+  .global-chat-heading { align-items: flex-start; }
+  .global-chat-panel { min-height: 430px; padding: 12px; }
+  .chat-message-list { max-height: 58vh; }
+  .chat-compose-footer { align-items: flex-start; flex-direction: column; }
+  .chat-compose-footer .button { align-self: flex-end; }
+}

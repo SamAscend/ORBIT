@@ -13,7 +13,10 @@ The ORBIT wordmark and symbol assets are in `public/images/`; the app uses them 
    - [`supabase/migrations/202610270003_add_usernames.sql`](./supabase/migrations/202610270003_add_usernames.sql) adds unique member usernames and safely fills profiles that already existed.
    - [`supabase/migrations/202610270004_admin_member_separation.sql`](./supabase/migrations/202610270004_admin_member_separation.sql) keeps admin accounts out of the member directory and counts.
    - [`supabase/migrations/202610270005_calendar_profiles_and_participation.sql`](./supabase/migrations/202610270005_calendar_profiles_and_participation.sql) adds calendar participation, profile photos, and member sleep mode.
-3. Copy `.env.example` to `.env.local` and fill in the project URL and publishable key from **Supabase → Project Settings → API**.
+   - [`supabase/migrations/202610270006_membership_lifecycle_and_verification.sql`](./supabase/migrations/202610270006_membership_lifecycle_and_verification.sql) adds member-controlled pausing and private-token live card verification.
+   - [`supabase/migrations/202610270007_global_chat.sql`](./supabase/migrations/202610270007_global_chat.sql) adds persistent global chat, member profile visibility for chat, and realtime updates.
+   - [`supabase/migrations/202610300001_chat_member_profile_visibility.sql`](./supabase/migrations/202610300001_chat_member_profile_visibility.sql) reapplies chat profile visibility for projects where an earlier, partial version of migration 007 was run.
+3. Copy `.env.example` to `.env.local` and fill in the project URL and publishable key from **Supabase → Project Settings → API**. Add the service-role key as `SUPABASE_SERVICE_ROLE_KEY` only to server environments that support account closure.
 4. Start the website:
 
    ```powershell
@@ -23,7 +26,7 @@ The ORBIT wordmark and symbol assets are in `public/images/`; the app uses them 
 
 5. Open [http://localhost:3000](http://localhost:3000).
 
-The project URL and publishable key are safe to use in the browser. Never put a Supabase `service_role` key, database password, or other secret in a `NEXT_PUBLIC_` variable or commit it to source control.
+The project URL and publishable key are safe to use in the browser. `SUPABASE_SERVICE_ROLE_KEY` is a server-only secret required for permanent account closure. Never put it in a `NEXT_PUBLIC_` variable or commit a real key to source control.
 
 For email confirmation, open **Supabase → Authentication → URL Configuration** and add `http://localhost:3000/auth/confirm` and `http://localhost:3000/auth/confirm?next=/auth/reset-password` to the Redirect URLs list. For a deployed app, add the corresponding URLs for that exact domain. Member signup requires email confirmation when the project has email autoconfirm disabled; ORBIT returns users through this callback before opening the member dashboard. Configure a working SMTP provider in Supabase if confirmation or password-reset messages are not delivered.
 
@@ -49,7 +52,10 @@ For email confirmation, open **Supabase → Authentication → URL Configuration
 ## Workspace routes
 
 - `/` — member sign in, member sign up, and the separate admin sign-in entry.
-- `/member` — member dashboard and digital membership card.
+- `/member` — member dashboard, membership card, profile, and account options. Members can print or save a card; its QR code checks live membership status at `/verify/[token]`.
+- **Chat** in either workspace — the shared global ORBIT conversation, with persistent history, profile photos, and live updates. Administrators can hide/restore messages without deleting the stored record.
+- `/verify/[token]` — public, minimal live membership check. The unguessable token reveals only the active member's display name and crew ID; inactive or ended memberships do not verify.
+- `/api/membership/leave` — authenticated, password-confirmed permanent account closure. It requires the server-only `SUPABASE_SERVICE_ROLE_KEY`.
 - `/auth/reset-password` — secure password reset destination reached through a Supabase email link.
 - `/admin` — administrator dashboard, member directory, event, and quest areas.
 
@@ -59,7 +65,9 @@ The dashboard starts with empty events, quests, and member content. Its counts a
 
 The initial migration creates profiles, the ORBIT community, memberships, events, registrations, quests, submissions, and an XP ledger. The username migration enforces unique case-insensitive usernames. The admin-role migration synchronizes administrator status to profiles, so admins are excluded from member counts and the member directory. Administrators can create, edit, cancel, and delete events and quests, and suspend or reactivate member access. Row-level security separates member data from administrator access. Normal sign-up only creates a member account. Never expose a privileged Supabase key to the browser.
 
-Members can view admin-created events and quests in the calendar, join or leave either activity voluntarily, update their name and profile photo, and place their membership in sleep mode for up to 30 days. Administrators can review event and quest participants. Password recovery uses Supabase Auth email delivery; configure the `/auth/confirm` redirect URL in the Supabase project.
+Members can view admin-created events and quests in the calendar, join or leave either activity voluntarily, update their name and profile photo, and place their membership in sleep mode for up to 30 days. They can also pause membership, which keeps the account and progress while preventing access; administrators can reactivate paused memberships. Password recovery restores access to the existing server-side account and data. Permanent account closure requires the current password and an explicit typed confirmation, deletes the Auth user and its cascading profile, membership, registrations, submissions, and XP records, and removes the profile photo. It cannot be undone through the app; provider backups may retain deleted data according to their own retention schedule. A saved card cannot be remotely erased, but its live verification stops working when its membership is paused or its account is closed. Administrators can review event and quest participants.
+
+The global chat is available to active members and administrators. Messages are stored in Supabase; the latest messages load first and older history can be paged in. Members see current profile names/photos, and past messages switch to “Former member” if the account is permanently closed. Paused members cannot access chat until an administrator reactivates them. Administrators can hide and restore inappropriate messages; hidden text is moved to an admin-only table and restored when the message is unhidden, so moderation does not discard its contents. The database limits each sender to 8 messages per minute and each message to 1,000 characters.
 
 ## Checks
 

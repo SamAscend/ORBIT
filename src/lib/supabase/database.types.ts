@@ -13,13 +13,18 @@ export type Database = {
         { id: string; full_name: string; username: string; avatar_url?: string | null; is_admin?: boolean },
         { full_name?: string; username?: string; avatar_url?: string | null; is_admin?: boolean; updated_at?: string }
       >;
+      chat_messages: Table<
+        { id: string; sender_id: string | null; body: string; is_hidden: boolean; moderated_at: string | null; moderated_by: string | null; created_at: string },
+        { sender_id: string | null; body: string; is_hidden?: boolean; moderated_at?: string | null; moderated_by?: string | null },
+        { is_hidden?: boolean; moderated_at?: string | null; moderated_by?: string | null }
+      >;
       communities: Table<
         { id: string; name: string; slug: string; description: string; created_at: string },
         { name: string; slug: string; description?: string },
         { name?: string; description?: string }
       >;
       memberships: Table<
-        { id: string; community_id: string; user_id: string; crew_number: number; status: "active" | "suspended" | "left"; sleep_until: string | null; created_at: string },
+        { id: string; community_id: string; user_id: string; crew_number: number; status: "active" | "suspended" | "left"; sleep_until: string | null; verification_token: string; created_at: string },
         { community_id: string; user_id: string; status?: "active" | "suspended" | "left" },
         { status?: "active" | "suspended" | "left"; sleep_until?: string | null }
       >;
@@ -57,6 +62,8 @@ export type Database = {
     Views: Record<string, never>;
     Functions: {
       is_platform_admin: { Args: Record<PropertyKey, never>; Returns: boolean };
+      pause_own_membership: { Args: Record<PropertyKey, never>; Returns: undefined };
+      verify_orbit_membership: { Args: { p_token: string }; Returns: { member_name: string; crew_number: number }[] };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
