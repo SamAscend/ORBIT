@@ -325,6 +325,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .membership-card-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
 .membership-card-actions p { max-width: 340px; margin: 0; color: #89978c; font-size: 10px; line-height: 1.6; }
 .membership-card-actions .button { flex: 0 0 auto; }
+.membership-save-error { margin: 0 0 10px; color: #98675d; font-size: 10px; }
 .membership-print-area .member-card { width: 100%; }
 .card-note { display: flex; align-items: flex-start; gap: 9px; margin-top: 11px; color: #89978c; font-size: 9px; line-height: 1.55; }
 .card-note svg { flex: 0 0 auto; color: #819b7b; }
@@ -783,9 +784,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   }
   .membership-print-area .card-chip { top: 5mm; right: 6mm; font-size: 6pt; }
   .membership-print-area .card-orbit-logo { width: 27mm; }
-  .membership-print-area .card-member-info { margin-top: 8mm; }
-  .membership-print-area .card-member-info { max-width: 60%; }
-  .membership-print-area .card-member-info h2 { margin: 2mm 0 1mm; font-size: 14pt; overflow-wrap: anywhere; }
+  .membership-print-area .card-member-info { position: absolute; top: 19mm; left: 6mm; max-width: 44mm; margin: 0; }
+  .membership-print-area .card-member-info .eyebrow { font-size: 5pt; }
+  .membership-print-area .card-member-info h2 { display: -webkit-box; max-width: 44mm; margin: 2mm 0 1mm; overflow: hidden; font-size: 14pt; line-height: 1.05; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .membership-print-area .card-member-info > span:last-child { font-size: 7pt; }
   .membership-print-area .member-card-qr { right: 6mm; bottom: 14mm; gap: 1mm; font-size: 4pt; }
   .membership-print-area .member-card-qr svg { width: 18mm; height: 18mm; padding: 1mm; }

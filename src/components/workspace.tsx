@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { GlobalChat } from "@/components/global-chat";
-import { QRCodeSVG } from "qrcode.react";
+import { QRCodeCanvas } from "qrcode.react";
 import type { Database } from "@/lib/supabase/database.types";
 import type { User } from "@supabase/supabase-js";
 import { OrbitLogo, OrbitSymbol } from "@/components/orbit-logo";
@@ -408,6 +408,9 @@ function MemberOverview({ counts, loading, name, email, events, quests, onNaviga
 }
 
 function MemberCard({ counts, loading, name, sleepUntil }: { counts: Counts; loading: boolean; name: string; sleepUntil: string | null }) {
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const qrCanvasRef = useRef<HTMLCanvasElement>(null);
   const crewId = counts.crewNumber === null ? "—" : `MZ-${String(counts.crewNumber).padStart(4, "0")}`;
   const sleeping = Boolean(sleepUntil && new Date(sleepUntil) > new Date());
   const origin = useSyncExternalStore(subscribeToPageOrigin, getPageOrigin, () => "");
@@ -423,11 +426,243 @@ function MemberCard({ counts, loading, name, sleepUntil }: { counts: Counts; loa
         ? "MEMBERSHIP ENDED"
         : "STATUS UNAVAILABLE";
 
-  function printCard() {
-    window.print();
+  async function saveCardAsPdf() {
+    const qrCanvas = qrCanvasRef.current;
+    if (!qrCanvas) {
+      setSaveError("The membership card is not ready yet. Please try again.");
+      return;
+    }
+
+    setSaving(true);
+    setSaveError("");
+
+    try {
+      const [{ jsPDF }, logo] = await Promise.all([import("jspdf"), loadMembershipLogo()]);
+      const canvas = drawMembershipCard({ name, statusLabel, crewId, qrCanvas, logo });
+      const pdf = new jsPDF({
+        orientation: "landscape",
+        unit: "mm",
+        format: [85.6, 54],
+      });
+      const fileName = `ORBIT-membership-${crewId}.pdf`;
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 85.6, 54);
+
+      downloadPdf(pdf.output("blob"), fileName);
+    } catch (error) {
+      setSaveError(error instanceof Error ? `Could not create the PDF: ${error.message}` : "Could not create the PDF. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  return <><section className="page-heading"><div><span className="eyebrow">YOUR COMMUNITY, YOUR CARD</span><h1>Membership</h1><p className="page-intro">Keep a copy on your device or print a wallet-sized card.</p></div></section>{sleeping && <div className="sleep-notice" role="status">Sleep mode is on until {new Date(sleepUntil!).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}. Your membership remains active, but participation is paused.</div>}<section className="membership-print-area" aria-label="Membership card"><div className="membership-card-actions"><p>Print it, or choose “Save as PDF” in your device’s print dialog to keep an offline copy.</p><button type="button" className="button button-primary" onClick={printCard} disabled={loading || counts.crewNumber === null || !verificationUrl}>Print / Save as PDF</button></div><div className="member-card"><div className="member-card-top"><div className="brand-lockup brand-light"><OrbitLogo className="card-orbit-logo" /></div><span className="card-chip">{loading ? "LOADING" : statusLabel}</span></div><div className="card-member-info"><span className="eyebrow">GOOD TO HAVE YOU HERE</span><h2>{name}</h2><span>ORBIT COMMUNITY</span></div><div className="member-card-qr">{verificationUrl ? <QRCodeSVG value={verificationUrl} size={88} level="M" title="Scan to verify this ORBIT membership" /> : <span>VERIFY<br />ONLINE</span>}<small>SCAN TO VERIFY</small></div><div className="card-footer"><div><span className="eyebrow">YOUR CREW ID</span><b>{loading ? "…" : crewId}</b></div><span className="member-card-mark">✳</span></div><div className="member-card-disclaimer">STATUS MAY CHANGE · VERIFY ONLINE</div></div><p className="card-note">A saved or printed card is an offline snapshot. Scan its QR code for current status; inactive or ended memberships will not verify.</p></section></>;
+  return (
+    <>
+      <section className="page-heading">
+        <div>
+          <span className="eyebrow">YOUR COMMUNITY, YOUR CARD</span>
+          <h1>Membership</h1>
+          <p className="page-intro">Keep a copy on your device or print a wallet-sized card.</p>
+        </div>
+      </section>
+      {sleeping && <div className="sleep-notice" role="status">Sleep mode is on until {new Date(sleepUntil!).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}. Your membership remains active, but participation is paused.</div>}
+      <section className="membership-print-area" aria-label="Membership card">
+        <div className="membership-card-actions">
+          <p>Download a wallet-sized PDF directly to your device.</p>
+          <button
+            type="button"
+            className="button button-primary"
+            onClick={saveCardAsPdf}
+            disabled={saving || loading || counts.crewNumber === null || !verificationUrl}
+          >
+            {saving ? "Creating PDF…" : "Download / Save as PDF"}
+          </button>
+        </div>
+        {saveError && <p className="membership-save-error" role="alert">{saveError}</p>}
+        <div className="member-card">
+          <div className="member-card-top">
+            <div className="brand-lockup brand-light"><OrbitLogo className="card-orbit-logo" /></div>
+            <span className="card-chip">{loading ? "LOADING" : statusLabel}</span>
+          </div>
+          <div className="card-member-info">
+            <span className="eyebrow">GOOD TO HAVE YOU HERE</span>
+            <h2>{name}</h2>
+            <span>ORBIT COMMUNITY</span>
+          </div>
+          <div className="member-card-qr">
+            {verificationUrl
+              ? <QRCodeCanvas ref={qrCanvasRef} value={verificationUrl} size={176} level="M" title="Scan to verify this ORBIT membership" />
+              : <span>VERIFY<br />ONLINE</span>}
+            <small>SCAN TO VERIFY</small>
+          </div>
+          <div className="card-footer">
+            <div><span className="eyebrow">YOUR CREW ID</span><b>{loading ? "…" : crewId}</b></div>
+            <span className="member-card-mark">✳</span>
+          </div>
+          <div className="member-card-disclaimer">STATUS MAY CHANGE · VERIFY ONLINE</div>
+        </div>
+        <p className="card-note">A saved or printed card is an offline snapshot. Scan its QR code for current status; inactive or ended memberships will not verify.</p>
+      </section>
+    </>
+  );
+}
+
+function loadMembershipLogo() {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not load the ORBIT logo."));
+    image.src = "/images/orbit-logo.png";
+  });
+}
+
+function drawMembershipCard({
+  name,
+  statusLabel,
+  crewId,
+  qrCanvas,
+  logo,
+}: {
+  name: string;
+  statusLabel: string;
+  crewId: string;
+  qrCanvas: HTMLCanvasElement;
+  logo: HTMLImageElement;
+}) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1012;
+  canvas.height = 638;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare the membership card image.");
+
+  const scale = canvas.width / 85.6;
+  const mm = (value: number) => value * scale;
+  const roundedRect = (x: number, y: number, width: number, height: number, radius: number) => {
+    const left = mm(x);
+    const top = mm(y);
+    const right = mm(x + width);
+    const bottom = mm(y + height);
+    const corner = mm(radius);
+    context.beginPath();
+    context.moveTo(left + corner, top);
+    context.lineTo(right - corner, top);
+    context.quadraticCurveTo(right, top, right, top + corner);
+    context.lineTo(right, bottom - corner);
+    context.quadraticCurveTo(right, bottom, right - corner, bottom);
+    context.lineTo(left + corner, bottom);
+    context.quadraticCurveTo(left, bottom, left, bottom - corner);
+    context.lineTo(left, top + corner);
+    context.quadraticCurveTo(left, top, left + corner, top);
+    context.closePath();
+  };
+
+  context.fillStyle = "#315d49";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.strokeStyle = "rgba(255,255,255,0.09)";
+  context.lineWidth = mm(0.2);
+  context.beginPath();
+  context.ellipse(mm(61), mm(13), mm(25), mm(25), 0, 0, Math.PI * 2);
+  context.ellipse(mm(61), mm(13), mm(32), mm(32), 0, 0, Math.PI * 2);
+  context.stroke();
+
+  context.fillStyle = "#fff";
+  roundedRect(3.2, 3.2, 34, 10.2, 1.2);
+  context.fill();
+  context.drawImage(logo, mm(4.2), mm(4.35), mm(31.5), mm(7.75));
+
+  context.strokeStyle = "rgba(255,255,255,0.38)";
+  context.lineWidth = mm(0.2);
+  roundedRect(60, 5, 22, 7, 3.5);
+  context.stroke();
+  context.fillStyle = "#e0eadf";
+  context.font = `600 ${mm(2.05)}px Arial, Helvetica, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(statusLabel, mm(71), mm(8.5), mm(20));
+
+  context.textAlign = "left";
+  context.textBaseline = "alphabetic";
+  context.fillStyle = "#b5cbb7";
+  context.font = `700 ${mm(1.75)}px Arial, Helvetica, sans-serif`;
+  context.fillText("GOOD TO HAVE YOU HERE", mm(3.2), mm(26.5));
+
+  const maxNameWidth = mm(51);
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  let nameFontSize = mm(5.5);
+  context.font = `normal ${nameFontSize}px Georgia, "Times New Roman", serif`;
+  let lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (line && context.measureText(candidate).width > maxNameWidth) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) lines.push(line);
+
+  if (lines.length > 2 || (lines.length === 1 && context.measureText(lines[0]).width > maxNameWidth)) {
+    nameFontSize = mm(4.7);
+    context.font = `normal ${nameFontSize}px Georgia, "Times New Roman", serif`;
+    lines = [];
+    line = "";
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (line && context.measureText(candidate).width > maxNameWidth) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = candidate;
+      }
+    }
+    if (line) lines.push(line);
+    if (lines.length > 2) lines = [lines[0], `${lines[1].slice(0, 20)}…`];
+  }
+
+  context.fillStyle = "#fff";
+  context.font = `normal ${nameFontSize}px Georgia, "Times New Roman", serif`;
+  const nameTop = lines.length > 1 ? 31.7 : 34.2;
+  lines.forEach((value, index) => context.fillText(value, mm(3.2), mm(nameTop + index * 4.2), maxNameWidth));
+
+  context.fillStyle = "#c3d2c4";
+  context.font = `normal ${mm(1.75)}px Arial, Helvetica, sans-serif`;
+  context.fillText("ORBIT COMMUNITY", mm(3.2), mm(lines.length > 1 ? 40.2 : 39.3));
+
+  context.fillStyle = "#fff";
+  roundedRect(63.5, 24.7, 19.5, 19.5, 1.2);
+  context.fill();
+  context.imageSmoothingEnabled = false;
+  context.drawImage(qrCanvas, mm(64.5), mm(25.7), mm(17.5), mm(17.5));
+  context.imageSmoothingEnabled = true;
+  context.fillStyle = "#d6e3d4";
+  context.font = `600 ${mm(1.25)}px Arial, Helvetica, sans-serif`;
+  context.textAlign = "center";
+  context.fillText("SCAN TO VERIFY", mm(73.25), mm(46.1));
+
+  context.textAlign = "left";
+  context.fillStyle = "#b3c9b4";
+  context.font = `700 ${mm(1.6)}px Arial, Helvetica, sans-serif`;
+  context.fillText("YOUR CREW ID", mm(3.2), mm(45.2));
+  context.fillStyle = "#fff";
+  context.font = `600 ${mm(2.7)}px Arial, Helvetica, sans-serif`;
+  context.fillText(crewId, mm(3.2), mm(50));
+  context.fillStyle = "#b3c9b4";
+  context.font = `normal ${mm(1.35)}px Arial, Helvetica, sans-serif`;
+  context.fillText("STATUS MAY CHANGE - VERIFY ONLINE", mm(3.2), mm(52.4));
+
+  return canvas;
+}
+
+function downloadPdf(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function CalendarView({ events, quests, onViewDetail }: { events: CommunityEvent[]; quests: CommunityQuest[]; onViewDetail: (detail: CommunityDetail) => void }) {
