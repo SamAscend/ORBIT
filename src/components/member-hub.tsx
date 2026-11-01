@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/database.types";
+import { useLanguage } from "@/lib/i18n";
 
 type DirectoryMember = Database["public"]["Functions"]["get_orbit_member_directory"]["Returns"][number];
 type Conversation = Database["public"]["Tables"]["direct_conversations"]["Row"];
@@ -56,6 +57,7 @@ export function MemberHub({ userId, showOnlineStatus, onOnlineStatusChange }: {
   showOnlineStatus: boolean;
   onOnlineStatusChange: (enabled: boolean) => void;
 }) {
+  const { t } = useLanguage();
   const [members, setMembers] = useState<DirectoryMember[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
   const [blockedMembers, setBlockedMembers] = useState<MemberProfile[]>([]);
@@ -335,28 +337,28 @@ export function MemberHub({ userId, showOnlineStatus, onOnlineStatusChange }: {
 
   return <section className="member-hub-page">
     <header className="page-heading member-hub-heading">
-      <div><span className="eyebrow">YOUR ORBIT CREW</span><h1>Members</h1><p className="page-intro">Meet the crew, see who’s around, and start a private conversation.</p></div>
+      <div><span className="eyebrow">{t("YOUR ORBIT CREW")}</span><h1>{t("Members")}</h1><p className="page-intro">{t("Meet the crew, see who’s around, and start a private conversation.")}</p></div>
       <label className="online-preference">
         <input type="checkbox" checked={showOnlineStatus} disabled={savingStatus} onChange={(event) => void updateOnlineStatus(event.target.checked)} />
-        <span><b>Show my online status</b><small>Only active ORBIT members can see it.</small></span>
+        <span><b>{t("Show my online status")}</b><small>{t("Only active ORBIT members can see it.")}</small></span>
       </label>
     </header>
-    {error && <div className="workspace-error" role="alert"><b>Member interaction failed.</b><span>{error}</span><button type="button" onClick={() => setError("")}>Dismiss</button></div>}
-    {notice && <div className="member-hub-notice" role="status">{notice}<button type="button" onClick={() => setNotice("")}>Dismiss</button></div>}
+    {error && <div className="workspace-error" role="alert"><b>{t("Member interaction failed.")}</b><span>{error}</span><button type="button" onClick={() => setError("")}>{t("Dismiss")}</button></div>}
+    {notice && <div className="member-hub-notice" role="status">{notice}<button type="button" onClick={() => setNotice("")}>{t("Dismiss")}</button></div>}
     <div className="member-hub-layout">
-      <section className="workspace-panel member-hub-directory" aria-label="Member directory">
-        <div className="member-hub-tabs" role="tablist" aria-label="Member lists">
-          {(["members", "messages", "blocked"] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} onClick={() => { setTab(item); setSearch(""); }}>{item === "members" ? `Crew (${members.length})` : item === "messages" ? `Messages (${threads.length})` : `Blocked (${blockedMembers.length})`}</button>)}
+      <section className="workspace-panel member-hub-directory" aria-label={t("Member directory")}>
+        <div className="member-hub-tabs" role="tablist" aria-label={t("Member lists")}>
+          {(["members", "messages", "blocked"] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={tab === item} className={tab === item ? "active" : ""} onClick={() => { setTab(item); setSearch(""); }}>{item === "members" ? `${t("Members")} (${members.length})` : item === "messages" ? `${t("Messages")} (${threads.length})` : `${t("Blocked")} (${blockedMembers.length})`}</button>)}
         </div>
-        <label className="member-hub-search"><span className="visually-hidden">Search members</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${tab}…`} /></label>
+        <label className="member-hub-search"><span className="visually-hidden">{t("Search members")}</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`${t("Search members")}…`} /></label>
         <div className="member-hub-list" aria-live="polite">
           {loading
-            ? <p className="member-hub-empty">Loading your ORBIT crew…</p>
+            ? <p className="member-hub-empty">{t("Loading your ORBIT crew…")}</p>
             : filteredMembers.length === 0
-              ? <p className="member-hub-empty">{tab === "messages" ? "No conversations yet. Choose someone in the crew to say hello." : tab === "blocked" ? "You haven’t blocked anyone." : "No members match that search."}</p>
+              ? <p className="member-hub-empty">{t(tab === "messages" ? "No conversations yet. Choose someone in the crew to say hello." : tab === "blocked" ? "You haven’t blocked anyone." : "No members match that search.")}</p>
               : filteredMembers.map((member) => {
                 const isOnline = member.show_online_status && onlineUserIds.has(member.user_id);
-                const presenceLabel = !member.show_online_status ? "Status hidden" : isOnline ? "Online" : "Offline";
+                const presenceLabel = !member.show_online_status ? t("Status hidden") : isOnline ? t("Online") : t("Offline");
                 const thread = threads.find((item) => item.member.id === member.user_id);
                 const isBlocked = tab === "blocked";
                 return <article className={`member-hub-person ${selected?.member.id === member.user_id ? "selected" : ""}`} key={member.user_id}>
@@ -369,14 +371,14 @@ export function MemberHub({ userId, showOnlineStatus, onOnlineStatusChange }: {
                       username: member.username,
                       avatar_url: member.avatar_url,
                       show_online_status: member.show_online_status,
-                    }, true)}>Unblock</button>
+                    }, true)}>{t("Unblock")}</button>
                     : <button className="member-hub-message-action" type="button" onClick={() => void openConversation({
                       id: member.user_id,
                       full_name: member.full_name,
                       username: member.username,
                       avatar_url: member.avatar_url,
                       show_online_status: member.show_online_status,
-                    })}>{tab === "messages" ? "Open" : thread ? "Message" : "Say hello"}</button>}
+                    })}>{tab === "messages" ? t("Open") : thread ? t("Chat") : t("Say hello")}</button>}
                 </article>;
               })}
         </div>

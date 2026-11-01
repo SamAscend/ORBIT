@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { OrbitLogo } from "@/components/orbit-logo";
+import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
 
 export function PasswordResetPage() {
   const router = useRouter();
+  const { t } = useLanguage();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -64,19 +66,20 @@ export function PasswordResetPage() {
 
   return <main className="auth-page reset-password-page">
     <section className="auth-panel reset-password-panel">
+      <div className="auth-language"><LanguageSwitcher /></div>
       <div className="auth-brand"><OrbitLogo className="auth-orbit-logo" /></div>
       <div className="auth-form-wrap">
         <span className="eyebrow">ACCOUNT SECURITY</span>
-        <h2>Choose a new password.</h2>
-        <p className="auth-subtitle">Create a new password for your ORBIT account.</p>
+        <h2>{t("Choose a new password.")}</h2>
+        <p className="auth-subtitle">{t("Create a new password for your ORBIT account.")}</p>
         {error && <div className="auth-message" role="alert">{error}</div>}
         {ready && <form className="auth-form" onSubmit={submit}>
-          <label>New password<input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} required /></label>
-          <label>Confirm new password<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength={8} required /></label>
-          <button className="button button-primary auth-submit" type="submit" disabled={busy}>{busy ? "Updating…" : "Update password"}<span>↗</span></button>
+          <label>{t("New password")}<input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} required /></label>
+          <label>{t("Confirm new password")}<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} minLength={8} required /></label>
+          <button className="button button-primary auth-submit" type="submit" disabled={busy}>{busy ? t("Saving…") : t("Update password")}<span>↗</span></button>
         </form>}
         {!ready && !error && <p className="auth-subtitle">Verifying your secure reset link…</p>}
-        <p className="auth-switch-prompt"><Link href="/">Return to sign in</Link></p>
+        <p className="auth-switch-prompt"><Link href="/">{t("Return to sign in")}</Link></p>
       </div>
     </section>
   </main>;

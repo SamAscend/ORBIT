@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { OrbitLogo } from "@/components/orbit-logo";
+import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
 
 type AuthMode = "member" | "admin";
 type AuthAction = "signin" | "signup" | "recovery";
@@ -30,6 +31,7 @@ function authenticationErrorMessage(error: unknown) {
 
 export function AuthPage() {
   const router = useRouter();
+  const { t } = useLanguage();
   const configured = Boolean(getSupabaseConfig());
   const [mode, setMode] = useState<AuthMode>("member");
   const [action, setAction] = useState<AuthAction>("signin");
@@ -174,47 +176,48 @@ export function AuthPage() {
       <section className="auth-story">
         <div className="auth-brand"><OrbitLogo className="auth-orbit-logo" /></div>
         <div className="auth-story-copy">
-          <span className="eyebrow">A COMMUNITY, IN MOTION</span>
-          <h1>Better together.<br /><em>One step at a time.</em></h1>
-          <p>Find your people, show up for each other, and make every mile mean a little more.</p>
+          <span className="eyebrow">{t("A COMMUNITY, IN MOTION")}</span>
+          <h1>{t("Better together.")}<br /><em>{t("One step at a time.")}</em></h1>
+          <p>{t("Find your people, show up for each other, and make every mile mean a little more.")}</p>
         </div>
-        <div className="auth-story-bottom"><span>✳</span><p>Made for the miles ahead.</p></div>
+        <div className="auth-story-bottom"><span>✳</span><p>{t("Made for the miles ahead.")}</p></div>
         <span className="auth-orbit auth-orbit-one" /><span className="auth-orbit auth-orbit-two" />
       </section>
 
       <section className="auth-panel">
+        <div className="auth-language"><LanguageSwitcher /></div>
         <div className="auth-form-wrap">
-          <span className="eyebrow">{mode === "admin" ? "PLATFORM ADMINISTRATION" : "WELCOME TO YOUR CREW"}</span>
-          <h2>{action === "signup" ? "Find your people." : action === "recovery" ? "Reset your password." : mode === "admin" ? "Admin sign in." : "Good to see you."}</h2>
-          <p className="auth-subtitle">{action === "signup" ? "Create your member account and join the ORBIT community." : action === "recovery" ? "We’ll email you a secure link to choose a new password." : mode === "admin" ? "Sign in with the administrator account provisioned by the platform owner." : "Sign in to pick up where your crew left off."}</p>
-          {(action === "signup" || action === "recovery") && <button className="auth-back-button" type="button" onClick={() => { setAction("signin"); setMessage(""); setPasswordVisible(false); }}><span aria-hidden="true">←</span> Back to sign in</button>}
+          <span className="eyebrow">{t(mode === "admin" ? "PLATFORM ADMINISTRATION" : "WELCOME TO YOUR CREW")}</span>
+          <h2>{t(action === "signup" ? "Find your people." : action === "recovery" ? "Reset your password." : mode === "admin" ? "Admin sign in." : "Good to see you.")}</h2>
+          <p className="auth-subtitle">{t(action === "signup" ? "Create your member account and join the ORBIT community." : action === "recovery" ? "We’ll email you a secure link to choose a new password." : mode === "admin" ? "Sign in with the administrator account provisioned by the platform owner." : "Sign in to pick up where your crew left off.")}</p>
+          {(action === "signup" || action === "recovery") && <button className="auth-back-button" type="button" onClick={() => { setAction("signin"); setMessage(""); setPasswordVisible(false); }}><span aria-hidden="true">←</span> {t("Back to sign in")}</button>}
 
-          <div className="auth-mode-tabs" role="tablist" aria-label="Account type">
-            <button type="button" className={mode === "member" ? "selected" : ""} onClick={() => { setMode("member"); setAction("signin"); setMessage(""); setPasswordVisible(false); }}>Member</button>
-            <button type="button" className={mode === "admin" ? "selected" : ""} onClick={() => { setMode("admin"); setAction("signin"); setMessage(""); setPasswordVisible(false); }}>Admin</button>
+          <div className="auth-mode-tabs" role="tablist" aria-label={t("Account type")}>
+            <button type="button" className={mode === "member" ? "selected" : ""} onClick={() => { setMode("member"); setAction("signin"); setMessage(""); setPasswordVisible(false); }}>{t("Member")}</button>
+            <button type="button" className={mode === "admin" ? "selected" : ""} onClick={() => { setMode("admin"); setAction("signin"); setMessage(""); setPasswordVisible(false); }}>{t("Admin")}</button>
           </div>
 
-          {mode === "member" && <div className="auth-action-tabs"><button type="button" className={action === "signin" ? "selected" : ""} onClick={() => { setAction("signin"); setMessage(""); setPasswordVisible(false); }}>Sign in</button><button type="button" className={action === "signup" ? "selected" : ""} onClick={() => { setAction("signup"); setMessage(""); setPasswordVisible(false); }}>Create account</button></div>}
+          {mode === "member" && <div className="auth-action-tabs"><button type="button" className={action === "signin" ? "selected" : ""} onClick={() => { setAction("signin"); setMessage(""); setPasswordVisible(false); }}>{t("Sign in")}</button><button type="button" className={action === "signup" ? "selected" : ""} onClick={() => { setAction("signup"); setMessage(""); setPasswordVisible(false); }}>{t("Create account")}</button></div>}
 
           <form key={`${mode}-${action}`} className="auth-form" onSubmit={submit}>
-            {action === "signup" && mode === "member" && <label>Full name<input name="fullName" autoComplete="name" required maxLength={100} placeholder="How should we call you?" /></label>}
-            {action === "signup" && mode === "member" && <label>Username<span className="username-input-wrap"><span>@</span><input name="username" autoComplete="username" required minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" title="Use 3–24 letters, numbers, or underscores." placeholder="your_username" /></span></label>}
-            <label>Email address<input name="email" type="email" autoComplete="email" required placeholder="you@example.com" /></label>
-            {mode === "admin" && <p className="auth-field-hint">Use the email from the admin account in Supabase Authentication → Users. “ADMIN” is a profile username, not the sign-in email.</p>}
-            {action !== "recovery" && <label>Password<span className="password-input-wrap"><input name="password" type={passwordVisible ? "text" : "password"} autoComplete={action === "signup" ? "new-password" : "current-password"} minLength={action === "signup" ? 8 : undefined} required placeholder={action === "signup" ? "At least 8 characters" : "Enter your password"} /><button className="password-visibility" type="button" aria-label={passwordVisible ? "Hide password" : "Show password"} aria-pressed={passwordVisible} onClick={() => setPasswordVisible((visible) => !visible)}><PasswordVisibilityIcon visible={passwordVisible} /></button></span></label>}
-            {action === "signup" && <p className="auth-field-hint">After sign-up, confirm your email from the message Supabase sends before signing in.</p>}
+            {action === "signup" && mode === "member" && <label>{t("Full name")}<input name="fullName" autoComplete="name" required maxLength={100} placeholder={t("How should we call you?")} /></label>}
+            {action === "signup" && mode === "member" && <label>{t("Username")}<span className="username-input-wrap"><span>@</span><input name="username" autoComplete="username" required minLength={3} maxLength={24} pattern="[A-Za-z0-9_]+" title={t("Use 3–24 letters, numbers, or underscores.")} placeholder="your_username" /></span></label>}
+            <label>{t("Email address")}<input name="email" type="email" autoComplete="email" required placeholder="you@example.com" /></label>
+            {mode === "admin" && <p className="auth-field-hint">{t("Use the email from the admin account in Supabase Authentication → Users. “ADMIN” is a profile username, not the sign-in email.")}</p>}
+            {action !== "recovery" && <label>{t("Password")}<span className="password-input-wrap"><input name="password" type={passwordVisible ? "text" : "password"} autoComplete={action === "signup" ? "new-password" : "current-password"} minLength={action === "signup" ? 8 : undefined} required placeholder={t(action === "signup" ? "At least 8 characters" : "Enter your password")} /><button className="password-visibility" type="button" aria-label={t(passwordVisible ? "Hide password" : "Show password")} aria-pressed={passwordVisible} onClick={() => setPasswordVisible((visible) => !visible)}><PasswordVisibilityIcon visible={passwordVisible} /></button></span></label>}
+            {action === "signup" && <p className="auth-field-hint">{t("After sign-up, confirm your email from the message Supabase sends before signing in.")}</p>}
             {message && <div className="auth-message" role="alert">{message}</div>}
-            {confirmationEmail && mode === "member" && action === "signin" && <button className="auth-resend-button" type="button" onClick={() => void resendConfirmation()} disabled={resendingConfirmation}>{resendingConfirmation ? "Sending…" : "Resend confirmation email"}</button>}
-            {!configured && <div className="auth-setup-note"><b>Connect Supabase to continue</b><span>Add the project URL and publishable key to <code>.env.local</code>. See the setup steps in README.</span></div>}
-            <button className="button button-primary auth-submit" type="submit" disabled={!configured || busy}>{busy ? "One moment..." : action === "signup" ? "Create member account" : action === "recovery" ? "Send reset link" : mode === "admin" ? "Sign in as admin" : "Sign in"}<span>↗</span></button>
+            {confirmationEmail && mode === "member" && action === "signin" && <button className="auth-resend-button" type="button" onClick={() => void resendConfirmation()} disabled={resendingConfirmation}>{resendingConfirmation ? t("Sending…") : t("Resend confirmation email")}</button>}
+            {!configured && <div className="auth-setup-note"><b>{t("Connect Supabase to continue")}</b><span>{t("Add the project URL and publishable key to .env.local. See the setup steps in README.")}</span></div>}
+            <button className="button button-primary auth-submit" type="submit" disabled={!configured || busy}>{busy ? t("One moment...") : action === "signup" ? t("Create member account") : action === "recovery" ? t("Send reset link") : mode === "admin" ? t("Sign in as admin") : t("Sign in")}<span>↗</span></button>
           </form>
 
-          {mode === "member" && action === "signin" && <button className="auth-resend-button" type="button" onClick={() => { setAction("recovery"); setMessage(""); }}>Forgot your password?</button>}
-          {mode === "member" && action === "signin" && <p className="auth-switch-prompt">New around here? <button onClick={() => { setAction("signup"); setMessage(""); }}>Create a member account</button></p>}
-          {mode === "admin" && <p className="auth-admin-note">Admin accounts are created by the platform owner. There is no public admin sign-up.</p>}
-          <p className="auth-legal">By continuing, you agree to use this community respectfully and keep members’ information private.</p>
+          {mode === "member" && action === "signin" && <button className="auth-resend-button" type="button" onClick={() => { setAction("recovery"); setMessage(""); }}>{t("Forgot your password?")}</button>}
+          {mode === "member" && action === "signin" && <p className="auth-switch-prompt">{t("New around here?")} <button onClick={() => { setAction("signup"); setMessage(""); }}>{t("Create a member account")}</button></p>}
+          {mode === "admin" && <p className="auth-admin-note">{t("Admin accounts are created by the platform owner. There is no public admin sign-up.")}</p>}
+          <p className="auth-legal">{t("By continuing, you agree to use this community respectfully and keep members’ information private.")}</p>
         </div>
-        <div className="auth-footer"><span>© 2026 ORBIT</span><span>GOOD THINGS HAPPEN TOGETHER</span></div>
+        <div className="auth-footer"><span>© 2026 ORBIT</span><span>{t("GOOD THINGS HAPPEN TOGETHER")}</span></div>
       </section>
     </main>
   );

@@ -1,23 +1,38 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { GlobalChat } from "@/components/global-chat";
+import { Announcements } from "@/components/announcements";
 import { MemberHub, MemberReportManager } from "@/components/member-hub";
 import { MemberPresence } from "@/components/member-presence";
 import { QRCodeCanvas } from "qrcode.react";
 import type { Database } from "@/lib/supabase/database.types";
 import type { User } from "@supabase/supabase-js";
 import { OrbitLogo, OrbitSymbol } from "@/components/orbit-logo";
+import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
+import { WorkspaceOnboarding } from "@/components/workspace-onboarding";
 
 type WorkspaceRole = "admin" | "member";
+type GreetingKey = "Welcome" | "Good morning" | "Good afternoon" | "Good evening";
 type Counts = { members: number; events: number; quests: number; xp: number; crewNumber: number | null; membershipStatus: MembershipRecord["status"] | null; verificationToken: string | null };
-type ViewName = "Overview" | "Calendar" | "Events" | "Quests" | "Members" | "Membership" | "Profile" | "Chat" | "Reports";
+type ViewName = "Overview" | "Calendar" | "Events" | "Quests" | "Quest Review" | "My Progress" | "Members" | "Membership" | "Profile" | "Chat" | "Updates" | "Reports";
 type Participant = { userId: string; fullName: string; username: string };
-type CommunityEvent = Pick<Database["public"]["Tables"]["events"]["Row"], "id" | "title" | "description" | "visibility" | "start_at" | "location" | "capacity" | "status"> & { registered?: boolean; participants?: Participant[] };
+type EventRegistrationStatus = "registered" | "waitlisted" | null;
+type EventAvailability = Database["public"]["Functions"]["get_orbit_event_availability"]["Returns"][number];
+type CommunityEvent = Pick<Database["public"]["Tables"]["events"]["Row"], "id" | "title" | "description" | "visibility" | "start_at" | "location" | "capacity" | "status"> & {
+  registered?: boolean;
+  registrationStatus?: EventRegistrationStatus;
+  registeredCount?: number;
+  waitlistCount?: number;
+  waitlistPosition?: number | null;
+  participants?: Participant[];
+  waitlistedParticipants?: Participant[];
+};
 type CommunityQuest = Pick<Database["public"]["Tables"]["quests"]["Row"], "id" | "title" | "description" | "xp_reward" | "goal" | "deadline"> & { registered?: boolean; participants?: Participant[] };
+type QuestSubmission = Database["public"]["Tables"]["quest_submissions"]["Row"];
 type MembershipRecord = Pick<Database["public"]["Tables"]["memberships"]["Row"], "user_id" | "crew_number" | "status" | "created_at" | "sleep_until" | "verification_token">;
 type DirectoryMember = { userId: string; fullName: string; username: string; crewNumber: number; status: string; joinedAt: string; sleepUntil: string | null };
 type ProfileData = { fullName: string; username: string; avatarUrl: string | null };
@@ -25,6 +40,7 @@ type WorkspaceData = { events: CommunityEvent[]; quests: CommunityQuest[]; membe
 type EventDraft = { title: string; description: string; visibility: "public" | "private"; status: "open" | "cancelled" | "completed"; startAt: string; location: string; capacity: string };
 type QuestDraft = { title: string; description: string; xpReward: string; goal: string; deadline: string };
 type CommunityDetail = { kind: "event"; item: CommunityEvent } | { kind: "quest"; item: CommunityQuest };
+type ListFilterOption = { value: string; label: string };
 
 function workspaceLoadErrorMessage(error: unknown) {
   if (!error || typeof error !== "object") {
@@ -44,13 +60,13 @@ function workspaceLoadErrorMessage(error: unknown) {
     || normalizedMessage.includes("schema cache")
     || normalizedMessage.includes("does not exist")
   ) {
-    return "The ORBIT database is missing a required migration. Run migrations 202610270005_calendar_profiles_and_participation.sql, 202610270006_membership_lifecycle_and_verification.sql, 202610270007_global_chat.sql, 202611010001_member_interactions.sql, and 202611010002_fix_member_interaction_rls.sql in the Supabase SQL Editor, then reload this page.";
+    return "The ORBIT database is missing a required migration. Run migrations 202610270005_calendar_profiles_and_participation.sql, 202610270006_membership_lifecycle_and_verification.sql, 202610270007_global_chat.sql, 202611010001_member_interactions.sql, 202611010002_fix_member_interaction_rls.sql, 202611010003_quest_submission_review.sql, 202611010004_admin_clear_global_chat.sql, 202611010005_event_capacity_waitlist.sql, and 202611010006_community_announcements.sql in the Supabase SQL Editor, then reload this page.";
   }
 
   return message;
 }
 
-function greetingFor(hour: number) {
+function greetingFor(hour: number): GreetingKey {
   if (hour < 12) return "Good morning";
   if (hour < 18) return "Good afternoon";
   return "Good evening";
@@ -62,6 +78,17 @@ function subscribeToPageOrigin() {
 
 function getPageOrigin() {
   return window.location.origin;
+}
+
+function useCurrentTimestamp() {
+  const [timestamp, setTimestamp] = useState<number | null>(null);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setTimestamp(Date.now()), 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  return timestamp;
 }
 
 function Icon({ name }: { name: "grid" | "calendar" | "flag" | "users" | "card" | "settings" | "logout" | "eye" | "chat" }) {
@@ -79,12 +106,44 @@ function Icon({ name }: { name: "grid" | "calendar" | "flag" | "users" | "card" 
   return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
 
+function ListToolbar({ search, onSearchChange, filter, onFilterChange, options, searchLabel, resultCount }: {
+  search: string;
+  onSearchChange: (value: string) => void;
+  filter: string;
+  onFilterChange: (value: string) => void;
+  options: ListFilterOption[];
+  searchLabel: string;
+  resultCount: number;
+}) {
+  return <div className="list-toolbar">
+    <label className="list-search-field">
+      <span className="visually-hidden">Search {searchLabel}</span>
+      <input type="search" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder={`Search ${searchLabel}…`} />
+    </label>
+    <label className="list-filter-field">
+      <span className="visually-hidden">Filter {searchLabel}</span>
+      <select value={filter} onChange={(event) => onFilterChange(event.target.value)} aria-label={`Filter ${searchLabel}`}>
+        {options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+      </select>
+    </label>
+    <span className="list-result-count" aria-live="polite">{resultCount} {resultCount === 1 ? "result" : "results"}</span>
+  </div>;
+}
+
+function NoListResults({ itemLabel }: { itemLabel: string }) {
+  return <div className="list-no-results" role="status">No {itemLabel} match your search or filter.</div>;
+}
+
 export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
   const router = useRouter();
+  const { t } = useLanguage();
   const [view, setView] = useState<ViewName>("Overview");
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [greeting, setGreeting] = useState("Welcome");
   const [counts, setCounts] = useState<Counts>({ members: 0, events: 0, quests: 0, xp: 0, crewNumber: null, membershipStatus: null, verificationToken: null });
   const [workspaceData, setWorkspaceData] = useState<WorkspaceData>({ events: [], quests: [], members: [] });
+  const [memberSubmissions, setMemberSubmissions] = useState<QuestSubmission[]>([]);
   const [profileUsername, setProfileUsername] = useState("");
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [showOnlineStatus, setShowOnlineStatus] = useState(false);
@@ -94,6 +153,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
   const [signingOut, setSigningOut] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
+  const [participationBusy, setParticipationBusy] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState<CommunityDetail | null>(null);
 
   const displayName = useMemo(() => {
@@ -113,6 +173,33 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
   }, []);
 
   useEffect(() => {
+    if (loading) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      try {
+        const key = `orbit-onboarding-v1:${role}:${user.id}`;
+        if (active) setOnboardingOpen(window.localStorage.getItem(key) !== "completed");
+      } catch (storageError) {
+        console.error("Could not read the ORBIT onboarding preference.", storageError);
+        if (active) setOnboardingOpen(true);
+      }
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [loading, role, user.id]);
+
+  const dismissOnboarding = useCallback(() => {
+    try {
+      window.localStorage.setItem(`orbit-onboarding-v1:${role}:${user.id}`, "completed");
+    } catch (storageError) {
+      console.error("Could not save the ORBIT onboarding preference.", storageError);
+    }
+    setOnboardingOpen(false);
+  }, [role, user.id]);
+
+  useEffect(() => {
     let active = true;
 
     async function loadCounts() {
@@ -124,14 +211,16 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
         const membershipQuery = role === "admin"
           ? supabase.from("memberships").select("user_id, crew_number, status, created_at, sleep_until, verification_token").neq("status", "left").order("created_at", { ascending: false }).limit(1000)
           : supabase.from("memberships").select("user_id, crew_number, status, created_at, sleep_until, verification_token", { count: "exact" }).eq("user_id", user.id).limit(1);
-        const [membershipResult, eventResult, questResult] = await Promise.all([
+        const [membershipResult, eventResult, questResult, availabilityResult] = await Promise.all([
           membershipQuery,
           supabase.from("events").select("id, title, description, visibility, start_at, location, capacity, status", { count: "exact" }).order("start_at", { ascending: true }).limit(1000),
           supabase.from("quests").select("id, title, description, xp_reward, goal, deadline", { count: "exact" }).order("created_at", { ascending: false }).limit(1000),
+          supabase.rpc("get_orbit_event_availability"),
         ]);
         if (membershipResult.error) throw membershipResult.error;
         if (eventResult.error) throw eventResult.error;
         if (questResult.error) throw questResult.error;
+        if (availabilityResult.error) throw availabilityResult.error;
 
         let xp = 0;
         const memberships = membershipResult.data as MembershipRecord[];
@@ -140,17 +229,20 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
         let verificationToken: string | null = null;
         let directoryMembers: DirectoryMember[] = [];
         let profile: ProfileData | null = null;
-        let memberEventRegistrations = new Set<string>();
         let memberQuestRegistrations = new Set<string>();
+        let submissions: QuestSubmission[] = [];
         const eventParticipants = new Map<string, Participant[]>();
+        const eventWaitlistedParticipants = new Map<string, Participant[]>();
         const questParticipants = new Map<string, Participant[]>();
+        const eventAvailability = new Map<string, EventAvailability>(availabilityResult.data.map((availability) => [availability.event_id, availability]));
         if (role === "admin") {
           const userIds = memberships.map((membership) => membership.user_id);
           const [profilesResult, eventRegistrationsResult, questRegistrationsResult] = await Promise.all([
             userIds.length
               ? supabase.from("profiles").select("id, full_name, username, is_admin").in("id", userIds)
               : Promise.resolve({ data: [], error: null }),
-            supabase.from("event_registrations").select("event_id, user_id").eq("status", "registered"),
+            supabase.from("event_registrations").select("event_id, user_id, status, waitlisted_at")
+              .in("status", ["registered", "waitlisted"]).order("waitlisted_at", { ascending: true }),
             supabase.from("quest_registrations").select("quest_id, user_id").eq("status", "registered"),
           ]);
           if (profilesResult.error) throw profilesResult.error;
@@ -174,7 +266,12 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
           const attendeeProfiles = new Map(attendeeProfilesResult.data.map((attendee) => [attendee.id, { userId: attendee.id, fullName: attendee.full_name, username: attendee.username }]));
           for (const registration of eventRegistrationsResult.data) {
             const attendee = attendeeProfiles.get(registration.user_id);
-            if (attendee) eventParticipants.set(registration.event_id, [...(eventParticipants.get(registration.event_id) ?? []), attendee]);
+            if (!attendee) continue;
+            if (registration.status === "registered") {
+              eventParticipants.set(registration.event_id, [...(eventParticipants.get(registration.event_id) ?? []), attendee]);
+            } else {
+              eventWaitlistedParticipants.set(registration.event_id, [...(eventWaitlistedParticipants.get(registration.event_id) ?? []), attendee]);
+            }
           }
           for (const registration of questRegistrationsResult.data) {
             const attendee = attendeeProfiles.get(registration.user_id);
@@ -185,17 +282,17 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
           crewNumber = memberships[0]?.crew_number ?? null;
           membershipStatus = memberships[0]?.status ?? null;
           verificationToken = memberships[0]?.verification_token ?? null;
-          const [profileResult, xpResult, eventRegistrationsResult, questRegistrationsResult] = await Promise.all([
+          const [profileResult, xpResult, questRegistrationsResult, submissionsResult] = await Promise.all([
             supabase.from("profiles").select("full_name, username, avatar_url, show_online_status").eq("id", user.id).maybeSingle(),
             supabase.from("xp_ledger").select("points").eq("user_id", user.id),
-            supabase.from("event_registrations").select("event_id").eq("user_id", user.id).eq("status", "registered"),
             supabase.from("quest_registrations").select("quest_id").eq("user_id", user.id).eq("status", "registered"),
+            supabase.from("quest_submissions").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
           ]);
           if (profileResult.error) throw profileResult.error;
           if (xpResult.error) throw xpResult.error;
-          if (eventRegistrationsResult.error) throw eventRegistrationsResult.error;
           if (questRegistrationsResult.error) throw questRegistrationsResult.error;
-          memberEventRegistrations = new Set(eventRegistrationsResult.data.map((registration) => registration.event_id));
+          if (submissionsResult.error) throw submissionsResult.error;
+          submissions = submissionsResult.data;
           memberQuestRegistrations = new Set(questRegistrationsResult.data.map((registration) => registration.quest_id));
           profile = profileResult.data ? { fullName: profileResult.data.full_name, username: profileResult.data.username, avatarUrl: profileResult.data.avatar_url } : null;
           setProfileUsername(profile?.username ?? "");
@@ -218,8 +315,15 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
           setWorkspaceData({
             events: eventResult.data.map((communityEvent) => ({
               ...communityEvent,
-              registered: memberEventRegistrations.has(communityEvent.id),
+              registered: eventAvailability.get(communityEvent.id)?.my_status === "registered",
+              registrationStatus: eventAvailability.get(communityEvent.id)?.my_status === "registered"
+                ? "registered"
+                : eventAvailability.get(communityEvent.id)?.my_status === "waitlisted" ? "waitlisted" : null,
+              registeredCount: eventAvailability.get(communityEvent.id)?.registered_count ?? 0,
+              waitlistCount: eventAvailability.get(communityEvent.id)?.waitlist_count ?? 0,
+              waitlistPosition: eventAvailability.get(communityEvent.id)?.my_waitlist_position ?? null,
               participants: eventParticipants.get(communityEvent.id) ?? [],
+              waitlistedParticipants: eventWaitlistedParticipants.get(communityEvent.id) ?? [],
             })),
             quests: questResult.data.map((communityQuest) => ({
               ...communityQuest,
@@ -228,6 +332,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
             })),
             members: directoryMembers,
           });
+          setMemberSubmissions(submissions);
         }
       } catch (loadError) {
         const message = workspaceLoadErrorMessage(loadError);
@@ -268,36 +373,85 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
 
   async function toggleParticipation(detail: CommunityDetail) {
     if (role !== "member") return;
+    setParticipationBusy(true);
     setError("");
     try {
       const supabase = createClient();
-      const isEvent = detail.kind === "event";
       const itemId = detail.item.id;
-      const existing = isEvent
-        ? await supabase.from("event_registrations").select("id, status").eq("event_id", itemId).eq("user_id", user.id).maybeSingle()
-        : await supabase.from("quest_registrations").select("id, status").eq("quest_id", itemId).eq("user_id", user.id).maybeSingle();
+      if (detail.kind === "event") {
+        const currentStatus = detail.item.registrationStatus ?? (detail.item.registered ? "registered" : null);
+        const leaving = currentStatus !== null;
+        let nextStatus: EventRegistrationStatus;
+        let promotedCount = 0;
+        if (leaving) {
+          const result = await supabase.rpc("leave_orbit_event", { p_event_id: itemId });
+          if (result.error) throw result.error;
+          promotedCount = result.data;
+          nextStatus = null;
+        } else {
+          const result = await supabase.rpc("join_orbit_event", { p_event_id: itemId });
+          if (result.error) throw result.error;
+          nextStatus = result.data === "waitlisted" ? "waitlisted" : "registered";
+        }
+        setSelectedDetail((current) => {
+          if (!current || current.kind !== "event" || current.item.id !== itemId) return current;
+          const previousStatus = current.item.registrationStatus ?? (current.item.registered ? "registered" : null);
+          const registeredCount = current.item.registeredCount ?? current.item.participants?.length ?? 0;
+          const waitlistCount = current.item.waitlistCount ?? 0;
+          return {
+            kind: "event",
+            item: {
+              ...current.item,
+              registered: nextStatus === "registered",
+              registrationStatus: nextStatus,
+              registeredCount: registeredCount
+                + (nextStatus === "registered" ? 1 : 0)
+                - (leaving && previousStatus === "registered" ? 1 : 0)
+                + promotedCount,
+              waitlistCount: waitlistCount
+                + (nextStatus === "waitlisted" ? 1 : 0)
+                - (leaving && previousStatus === "waitlisted" ? 1 : 0)
+                - promotedCount,
+              waitlistPosition: nextStatus === "waitlisted" ? waitlistCount + 1 : null,
+            },
+          };
+        });
+        setRefreshKey((key) => key + 1);
+        return;
+      }
+
+      const existing = await supabase.from("quest_registrations").select("id, status").eq("quest_id", itemId).eq("user_id", user.id).maybeSingle();
       if (existing.error) throw existing.error;
       const nextStatus = detail.item.registered ? "cancelled" : "registered";
       const result = existing.data
-        ? isEvent
-          ? await supabase.from("event_registrations").update({ status: nextStatus }).eq("id", existing.data.id)
-          : await supabase.from("quest_registrations").update({ status: nextStatus }).eq("id", existing.data.id)
-        : isEvent
-          ? await supabase.from("event_registrations").insert({ event_id: itemId, user_id: user.id })
-          : await supabase.from("quest_registrations").insert({ quest_id: itemId, user_id: user.id });
+        ? await supabase.from("quest_registrations").update({ status: nextStatus }).eq("id", existing.data.id)
+        : await supabase.from("quest_registrations").insert({ quest_id: itemId, user_id: user.id });
       if (result.error) throw result.error;
       setSelectedDetail((current) => {
         if (!current || current.kind !== detail.kind || current.item.id !== itemId) return current;
-        if (current.kind === "event") {
-          return { kind: "event", item: { ...current.item, registered: nextStatus === "registered" } };
-        }
+        if (current.kind !== "quest") return current;
         return { kind: "quest", item: { ...current.item, registered: nextStatus === "registered" } };
       });
       setRefreshKey((key) => key + 1);
     } catch (actionError) {
       console.error("Could not update event or quest participation.", actionError);
       setError(actionError instanceof Error ? actionError.message : "Could not update participation.");
+    } finally {
+      setParticipationBusy(false);
     }
+  }
+
+  async function submitQuestWork(questId: string, submissionText: string) {
+    if (role !== "member") return;
+    const { error: submissionError } = await createClient().rpc("submit_orbit_quest_work", {
+      p_quest_id: questId,
+      p_submission_text: submissionText,
+    });
+    if (submissionError) {
+      console.error("Could not submit ORBIT quest work.", submissionError);
+      throw submissionError;
+    }
+    setRefreshKey((key) => key + 1);
   }
 
   function updateProfile(profile: ProfileData) {
@@ -330,21 +484,27 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
     { label: "Calendar", icon: "calendar" },
     { label: "Events", icon: "calendar" },
     { label: "Quests", icon: "flag" },
+    { label: "Quest Review", icon: "flag" },
     { label: "Members", icon: "users" },
     { label: "Reports", icon: "flag" },
     { label: "Chat", icon: "chat" },
+    { label: "Updates", icon: "chat" },
   ];
   const memberNavigation: { label: ViewName; icon: "grid" | "calendar" | "flag" | "card" | "settings" | "chat" | "users" }[] = [
     { label: "Overview", icon: "grid" },
     { label: "Calendar", icon: "calendar" },
     { label: "Events", icon: "calendar" },
     { label: "Quests", icon: "flag" },
+    { label: "My Progress", icon: "flag" },
     { label: "Members", icon: "users" },
     { label: "Chat", icon: "chat" },
+    { label: "Updates", icon: "chat" },
     { label: "Membership", icon: "card" },
     { label: "Profile", icon: "settings" },
   ];
   const navigation = role === "admin" ? adminNavigation : memberNavigation;
+  const mobilePrimaryViews: ViewName[] = ["Overview", "Calendar", "Events", "Quests"];
+  const mobileSecondaryNavigation = navigation.filter((item) => !mobilePrimaryViews.includes(item.label));
   const activeView = view;
 
   return (
@@ -354,24 +514,26 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
         <Link className="brand-lockup" href={role === "admin" ? "/admin" : "/member"}><OrbitLogo className="sidebar-orbit-logo" /></Link>
         <div className="community-switcher"><span className="community-avatar"><OrbitSymbol className="community-orbit-symbol" /></span><span className="community-switch-copy"><b>ORBIT</b><small>{role === "admin" ? "Admin workspace" : "Your community"}</small></span></div>
         <nav className="workspace-nav" aria-label={`${role} navigation`}>
-          <span className="nav-group-label">{role === "admin" ? "ADMIN WORKSPACE" : "YOUR CREW"}</span>
-          {navigation.map((item) => <button key={item.label} className={`nav-item ${activeView === item.label ? "active" : ""}`} onClick={() => setView(item.label)}><Icon name={item.icon} /><span>{item.label}</span></button>)}
+          <span className="nav-group-label">{role === "admin" ? t("Admin workspace") : t("YOUR ORBIT CREW")}</span>
+          {navigation.map((item) => <button key={item.label} className={`nav-item ${activeView === item.label ? "active" : ""} ${mobilePrimaryViews.includes(item.label) ? "mobile-nav-primary" : "mobile-nav-secondary"}`} onClick={() => { setView(item.label); setMobileMoreOpen(false); }} aria-current={activeView === item.label ? "page" : undefined}><Icon name={item.icon} /><span>{t(item.label)}</span></button>)}
+          {mobileSecondaryNavigation.length > 0 && <button className={`mobile-nav-more ${mobileMoreOpen || mobileSecondaryNavigation.some((item) => item.label === activeView) ? "active" : ""}`} type="button" aria-expanded={mobileMoreOpen} aria-controls="mobile-nav-more-menu" onClick={() => setMobileMoreOpen((open) => !open)}><span>•••</span><span>{t("More")}</span></button>}
+          {mobileMoreOpen && mobileSecondaryNavigation.length > 0 && <div className="mobile-nav-more-menu" id="mobile-nav-more-menu">{mobileSecondaryNavigation.map((item) => <button type="button" key={item.label} className={`nav-item ${activeView === item.label ? "active" : ""}`} onClick={() => { setView(item.label); setMobileMoreOpen(false); }} aria-current={activeView === item.label ? "page" : undefined}><Icon name={item.icon} /><span>{t(item.label)}</span></button>)}</div>}
         </nav>
-        <div className="workspace-sidebar-bottom"><div className="sidebar-quote"><span>✳</span><p>{role === "admin" ? "A well-run community gives everyone room to grow." : "A crew is just people who keep showing up for each other."}</p><small>THE ORBIT WAY</small></div><div className="sidebar-footnote">MADE FOR THE MILES AHEAD <span>© 2026</span></div></div>
+        <div className="workspace-sidebar-bottom"><div className="sidebar-quote"><span>✳</span><p>{role === "admin" ? t("A well-run community gives everyone room to grow.") : t("A crew is just people who keep showing up for each other.")}</p><small>THE ORBIT WAY</small></div><div className="sidebar-footnote">MADE FOR THE MILES AHEAD <span>© 2026</span></div></div>
       </aside>
 
       <main className="workspace-main">
-        <header className="workspace-topbar"><div className="workspace-header-left">{activeView !== "Overview" && <button className="workspace-back-button" onClick={() => setView("Overview")} aria-label="Back to overview"><span aria-hidden="true">←</span><span>Back</span></button>}<div className="breadcrumb"><span>ORBIT</span><span>›</span><b>{activeView}</b></div></div><div className="workspace-account"><span className={`role-chip ${role}`}>{role === "admin" ? "ADMIN" : "MEMBER"}</span><span className="avatar avatar-profile" aria-label="Profile photo" style={profileData?.avatarUrl ? { backgroundImage: `url("${profileData.avatarUrl}")`, backgroundPosition: "center", backgroundSize: "cover" } : undefined}>{profileData?.avatarUrl ? "" : role === "admin" ? "AD" : displayName.slice(0, 2).toUpperCase()}</span><div className="profile-copy"><b>{displayName}</b><small>{role === "admin" ? "Platform administrator" : profileUsername ? `@${profileUsername}` : "Crew member"}</small></div><button className="signout-button" onClick={signOut} disabled={signingOut} aria-label="Sign out"><Icon name="logout" /></button></div></header>
+        <header className="workspace-topbar"><div className="workspace-header-left">{activeView !== "Overview" && <button className="workspace-back-button" onClick={() => setView("Overview")} aria-label={t("Back")}><span aria-hidden="true">←</span><span>{t("Back")}</span></button>}<div className="breadcrumb"><span>ORBIT</span><span>›</span><b>{t(activeView)}</b></div></div><div className="workspace-account"><LanguageSwitcher /><span className={`role-chip ${role}`}>{role === "admin" ? "ADMIN" : "MEMBER"}</span><span className="avatar avatar-profile" aria-label="Profile photo" style={profileData?.avatarUrl ? { backgroundImage: `url("${profileData.avatarUrl}")`, backgroundPosition: "center", backgroundSize: "cover" } : undefined}>{profileData?.avatarUrl ? "" : role === "admin" ? "AD" : displayName.slice(0, 2).toUpperCase()}</span><div className="profile-copy"><b>{displayName}</b><small>{role === "admin" ? t("Platform administrator") : profileUsername ? `@${profileUsername}` : t("Crew member")}</small></div><button className="signout-button" onClick={signOut} disabled={signingOut} aria-label={t("Sign out")}><Icon name="logout" /></button></div></header>
         <div className="workspace-content">
           <section className="welcome-row">
-            <div><div className="eyebrow">{role === "admin" ? "PLATFORM ADMINISTRATION" : "YOUR ORBIT MEMBERSHIP"}</div><h1>{greeting}, {displayName} <span className="wave">✳</span></h1><p className="page-intro">{role === "admin" ? "Here’s a clear view of your ORBIT community." : "Your place in the crew, and everything happening around you."}</p></div>
-            {role === "admin" && <span className="workspace-admin-badge"><Icon name="settings" /> Admin workspace</span>}
+            <div><div className="eyebrow">{role === "admin" ? t("PLATFORM ADMINISTRATION") : t("Your community")}</div><h1>{t(greeting)}, {displayName} <span className="wave">✳</span></h1><p className="page-intro">{role === "admin" ? t("Here’s a clear view of your ORBIT community.") : t("Your place in the crew, and everything happening around you.")}</p></div>
+            {role === "admin" && <span className="workspace-admin-badge"><Icon name="settings" /> {t("Admin workspace")}</span>}
           </section>
 
-          {error && <div className="workspace-error" role="alert"><b>Could not load your workspace.</b><span>{error}</span><button onClick={() => router.refresh()}>Try again</button></div>}
+          {error && <div className="workspace-error" role="alert"><b>{t("Could not load your workspace.")}</b><span>{error}</span><button onClick={() => router.refresh()}>{t("Try again")}</button></div>}
 
           {activeView === "Overview" && (role === "admin"
-            ? <AdminOverview counts={counts} loading={loading} onNavigate={setView} />
+            ? <AdminOverview counts={counts} loading={loading} events={workspaceData.events} quests={workspaceData.quests} members={workspaceData.members} onNavigate={setView} onViewDetail={setSelectedDetail} />
             : <MemberOverview counts={counts} loading={loading} name={displayName} email={user.email ?? ""} events={workspaceData.events} quests={workspaceData.quests} onNavigate={setView} onViewDetail={setSelectedDetail} />)}
           {activeView === "Calendar" && <CalendarView events={workspaceData.events} quests={workspaceData.quests} onViewDetail={setSelectedDetail} />}
           {activeView === "Events" && (role === "admin"
@@ -380,6 +542,9 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
           {activeView === "Quests" && (role === "admin"
             ? <QuestManager quests={workspaceData.quests} adminId={user.id} onChanged={() => setRefreshKey((key) => key + 1)} onViewDetail={(item) => setSelectedDetail({ kind: "quest", item })} />
             : <EmptyWorkspaceSection role={role} kind="quests" count={counts.quests} loading={loading} quests={workspaceData.quests} onViewDetail={setSelectedDetail} />)}
+          {activeView === "Quest Review" && role === "admin" && <QuestReviewManager />}
+          {activeView === "My Progress" && role === "member" && <MemberProgress submissions={memberSubmissions} quests={workspaceData.quests} xp={counts.xp} loading={loading} onNavigate={setView} />}
+          {activeView === "Updates" && <Announcements role={role} userId={user.id} onNavigate={setView} />}
           {activeView === "Members" && role === "admin" && <EmptyWorkspaceSection role={role} kind="members" count={counts.members} loading={loading} members={workspaceData.members} onToggleMemberAccess={toggleMemberAccess} memberActionId={memberActionId} />}
           {activeView === "Members" && role === "member" && <MemberHub userId={user.id} showOnlineStatus={showOnlineStatus} onOnlineStatusChange={setShowOnlineStatus} />}
           {activeView === "Reports" && role === "admin" && <MemberReportManager adminId={user.id} />}
@@ -387,30 +552,85 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
           {activeView === "Profile" && role === "member" && profileData && <MemberProfile profile={profileData} sleepUntil={sleepUntil} userId={user.id} onProfileSaved={updateProfile} onSleepModeChanged={updateSleepMode} />}
           {activeView === "Chat" && <GlobalChat role={role} userId={user.id} />}
         </div>
-        {selectedDetail && <CommunityDetailDialog detail={selectedDetail} role={role} sleeping={Boolean(sleepUntil && new Date(sleepUntil) > new Date())} onToggleParticipation={() => void toggleParticipation(selectedDetail)} onClose={() => setSelectedDetail(null)} />}
-        <footer className="page-footer"><span>BUILT FOR THE MILES AHEAD <b>✳</b></span><span>ORBIT · Community, in motion.</span></footer>
+        {selectedDetail && <CommunityDetailDialog detail={selectedDetail} role={role} sleeping={Boolean(sleepUntil && new Date(sleepUntil) > new Date())} participationBusy={participationBusy} submissions={memberSubmissions} onSubmitQuestWork={submitQuestWork} onToggleParticipation={() => void toggleParticipation(selectedDetail)} onClose={() => setSelectedDetail(null)} />}
+        {onboardingOpen && <WorkspaceOnboarding
+          name={displayName}
+          actions={role === "admin"
+            ? [
+                { label: "Create a quest", description: "Set a goal and reward for your crew.", onChoose: () => { dismissOnboarding(); setView("Quests"); } },
+                { label: "Create an event", description: "Bring members together with an event.", onChoose: () => { dismissOnboarding(); setView("Events"); } },
+                { label: "Post an update", description: "Share important news with every member.", onChoose: () => { dismissOnboarding(); setView("Updates"); } },
+              ]
+            : [
+                { label: "Find an event", description: "See what your ORBIT crew is planning.", onChoose: () => { dismissOnboarding(); setView("Events"); } },
+                { label: "Meet your crew", description: "Find members and start a conversation.", onChoose: () => { dismissOnboarding(); setView("Members"); } },
+                { label: "Read crew updates", description: "Check official news from your ORBIT team.", onChoose: () => { dismissOnboarding(); setView("Updates"); } },
+              ]}
+          onDismiss={dismissOnboarding}
+        />}
+        <footer className="page-footer"><span>BUILT FOR THE MILES AHEAD <b>✳</b></span><span>ORBIT · {t("A COMMUNITY, IN MOTION")}.</span></footer>
       </main>
     </div>
   );
 }
 
-function AdminOverview({ counts, loading, onNavigate }: { counts: Counts; loading: boolean; onNavigate: (view: ViewName) => void }) {
+function AdminOverview({ counts, loading, events, quests, members, onNavigate, onViewDetail }: {
+  counts: Counts;
+  loading: boolean;
+  events: CommunityEvent[];
+  quests: CommunityQuest[];
+  members: DirectoryMember[];
+  onNavigate: (view: ViewName) => void;
+  onViewDetail: (detail: CommunityDetail) => void;
+}) {
+  const { t } = useLanguage();
+  const now = useCurrentTimestamp();
+  const upcomingEvents = events
+    .filter((event) => now !== null && event.status === "open" && new Date(event.start_at).getTime() >= now)
+    .sort((first, second) => first.start_at.localeCompare(second.start_at))
+    .slice(0, 3);
+  const upcomingQuests = quests
+    .filter((quest) => now !== null && quest.deadline && new Date(quest.deadline).getTime() >= now)
+    .sort((first, second) => (first.deadline ?? "").localeCompare(second.deadline ?? ""))
+    .slice(0, 3);
+  const pausedMembers = members.filter((member) => member.status !== "active").length;
+
   return <>
     <section className="metric-grid workspace-metrics">
-      <Metric title="Members" value={counts.members} icon="users" loading={loading} />
-      <Metric title="Events" value={counts.events} icon="calendar" loading={loading} />
-      <Metric title="Quests" value={counts.quests} icon="flag" loading={loading} />
+      <Metric title={t("Members")} value={counts.members} icon="users" loading={loading} />
+      <Metric title={t("Events")} value={counts.events} icon="calendar" loading={loading} />
+      <Metric title={t("Quests")} value={counts.quests} icon="flag" loading={loading} />
       <Metric title="Community" value="ORBIT" icon="grid" loading={loading} />
     </section>
-    <section className="workspace-panel admin-welcome-panel"><span className="eyebrow">YOUR COMMUNITY, IN ONE PLACE</span><h2>Welcome to your admin workspace.</h2><p>Manage your members, create and update community events, and publish quests—all changes here update the live ORBIT workspace.</p></section>
+    <section className="admin-overview-grid">
+      <div className="workspace-panel admin-schedule-panel">
+        <div className="panel-heading"><div><span className="eyebrow">WHAT’S NEXT</span><h2>Upcoming activity</h2></div></div>
+        <div className="admin-schedule-columns">
+          <section><div className="admin-schedule-title"><h3>Events</h3><button className="text-link" onClick={() => onNavigate("Events")}>Manage <span>↗</span></button></div>
+            {upcomingEvents.length ? <EventList events={upcomingEvents} onView={(item) => onViewDetail({ kind: "event", item })} /> : <p className="admin-overview-empty">{now === null || loading ? "Checking upcoming events…" : <>No upcoming open events. <button className="text-link" onClick={() => onNavigate("Events")}>Create one</button></>}</p>}
+          </section>
+          <section><div className="admin-schedule-title"><h3>Quest deadlines</h3><button className="text-link" onClick={() => onNavigate("Quests")}>Manage <span>↗</span></button></div>
+            {upcomingQuests.length ? <QuestList quests={upcomingQuests} onView={(item) => onViewDetail({ kind: "quest", item })} /> : <p className="admin-overview-empty">{now === null || loading ? "Checking quest deadlines…" : <>No upcoming quest deadlines. <button className="text-link" onClick={() => onNavigate("Quests")}>Create one</button></>}</p>}
+          </section>
+        </div>
+      </div>
+      <section className={`workspace-panel admin-attention-panel ${pausedMembers ? "has-attention" : ""}`}>
+        <span className="eyebrow">MEMBERSHIP CHECK-IN</span>
+        <div className="admin-attention-count">{loading ? "…" : pausedMembers.toLocaleString()}</div>
+        <h2>{pausedMembers === 1 ? "Membership to review" : "Memberships to review"}</h2>
+        <p>{loading ? "Checking member access status." : pausedMembers ? "These members have paused or suspended access." : "All listed memberships are currently active."}</p>
+        <button className="button button-secondary" onClick={() => onNavigate("Members")}>Open member directory <span>↗</span></button>
+      </section>
+    </section>
     <section className="workspace-quicklinks"><button onClick={() => onNavigate("Members")}><span className="quicklink-icon green"><Icon name="users" /></span><span><b>Member directory</b><small>Review members and control access</small></span><span className="quicklink-arrow">↗</span></button><button onClick={() => onNavigate("Events")}><span className="quicklink-icon peach"><Icon name="calendar" /></span><span><b>Manage events</b><small>Create, edit, cancel, or remove events</small></span><span className="quicklink-arrow">↗</span></button><button onClick={() => onNavigate("Quests")}><span className="quicklink-icon lavender"><Icon name="flag" /></span><span><b>Manage quests</b><small>Create and update crew challenges</small></span><span className="quicklink-arrow">↗</span></button></section>
   </>;
 }
 
 function MemberOverview({ counts, loading, name, email, events, quests, onNavigate, onViewDetail }: { counts: Counts; loading: boolean; name: string; email: string; events: CommunityEvent[]; quests: CommunityQuest[]; onNavigate: (view: ViewName) => void; onViewDetail: (detail: CommunityDetail) => void }) {
+  const { t } = useLanguage();
   return <>
-    <section className="member-welcome-card"><div className="welcome-card-copy"><span className="eyebrow">YOU’RE PART OF THE CREW</span><h2>Good to have you here, {name}.</h2><p>Your community membership is ready. Find an event or take on a quest when you’re ready.</p><button className="button button-primary" onClick={() => onNavigate("Events")}>Explore what’s happening <span>↗</span></button></div><OrbitSymbol className="welcome-card-mark" decorative /></section>
-    <section className="metric-grid workspace-metrics member-metrics"><Metric title="My membership" value={counts.crewNumber === null ? "—" : `MZ-${String(counts.crewNumber).padStart(4, "0")}`} icon="card" loading={loading} /><Metric title="Community events" value={counts.events} icon="calendar" loading={loading} /><Metric title="Open quests" value={counts.quests} icon="flag" loading={loading} /><Metric title="My XP" value={counts.xp} icon="grid" loading={loading} /></section>
+    <section className="member-welcome-card"><div className="welcome-card-copy"><span className="eyebrow">{t("YOUR ORBIT CREW")}</span><h2>{t("Welcome")}, {name}.</h2><p>{t("Your place in the crew, and everything happening around you.")}</p><button className="button button-primary" onClick={() => onNavigate("Events")}>{t("Events")} <span>↗</span></button></div><OrbitSymbol className="welcome-card-mark" decorative /></section>
+    <section className="metric-grid workspace-metrics member-metrics"><Metric title={t("Membership")} value={counts.crewNumber === null ? "—" : `MZ-${String(counts.crewNumber).padStart(4, "0")}`} icon="card" loading={loading} /><Metric title={t("Events")} value={counts.events} icon="calendar" loading={loading} /><Metric title={t("Quests")} value={counts.quests} icon="flag" loading={loading} /><Metric title={t("My Progress")} value={counts.xp} icon="grid" loading={loading} /></section>
     <section className="content-grid member-content-grid"><div className="workspace-panel"><div className="panel-heading"><div><span className="eyebrow">A GOOD PLACE TO START</span><h2>Find your next moment</h2></div><button className="text-link" onClick={() => onNavigate("Events")}>See events <span>↗</span></button></div>{events.length === 0 ? <EmptyMessage title="No events just yet" detail="When an organizer adds an event, you’ll find it here." /> : <EventList events={events.slice(0, 3)} onView={(item) => onViewDetail({ kind: "event", item })} />}</div><div className="workspace-panel"><div className="panel-heading"><div><span className="eyebrow">PROGRESS, NOT PERFECTION</span><h2>Quests for you</h2></div><button className="text-link" onClick={() => onNavigate("Quests")}>Explore <span>↗</span></button></div>{quests.length === 0 ? <EmptyMessage title="Your next challenge is on its way" detail="New crew quests will show up here." /> : <QuestList quests={quests.slice(0, 3)} onView={(item) => onViewDetail({ kind: "quest", item })} />}</div></section>
     <p className="member-account-note">Signed in as <b>{email}</b>. Your member profile is managed by your account.</p>
   </>;
@@ -676,6 +896,17 @@ function downloadPdf(blob: Blob, fileName: string) {
 
 function CalendarView({ events, quests, onViewDetail }: { events: CommunityEvent[]; quests: CommunityQuest[]; onViewDetail: (detail: CommunityDetail) => void }) {
   const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [calendarDisplay, setCalendarDisplay] = useState<"month" | "agenda">("month");
+  useEffect(() => {
+    const mobileViewport = window.matchMedia("(max-width: 760px)");
+    const timeout = window.setTimeout(() => setCalendarDisplay(mobileViewport.matches ? "agenda" : "month"), 0);
+    const updateDisplay = (event: MediaQueryListEvent) => setCalendarDisplay(event.matches ? "agenda" : "month");
+    mobileViewport.addEventListener("change", updateDisplay);
+    return () => {
+      window.clearTimeout(timeout);
+      mobileViewport.removeEventListener("change", updateDisplay);
+    };
+  }, []);
   const offset = (month.getDay() + 6) % 7;
   const dayCount = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
   const cellCount = Math.ceil((offset + dayCount) / 7) * 7;
@@ -684,6 +915,13 @@ function CalendarView({ events, quests, onViewDetail }: { events: CommunityEvent
     return number > 0 && number <= dayCount ? number : null;
   });
   const monthLabel = month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const agendaEntries = [
+    ...events.map((item) => ({ kind: "event" as const, item, date: item.start_at })),
+    ...quests.flatMap((item) => item.deadline ? [{ kind: "quest" as const, item, date: item.deadline }] : []),
+  ].filter((entry) => {
+    const date = new Date(entry.date);
+    return date.getFullYear() === month.getFullYear() && date.getMonth() === month.getMonth();
+  }).sort((first, second) => first.date.localeCompare(second.date));
   const entriesOn = (day: number) => {
     const dateKey = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     return [
@@ -692,8 +930,8 @@ function CalendarView({ events, quests, onViewDetail }: { events: CommunityEvent
     ];
   };
   return <section className="calendar-panel workspace-panel">
-    <div className="calendar-heading"><div><span className="eyebrow">ORBIT SCHEDULE</span><h1>Community calendar</h1><p className="page-intro">Plan around upcoming events and quest deadlines.</p></div><div className="calendar-controls"><button type="button" className="button button-secondary" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Previous month">‹</button><b>{monthLabel}</b><button type="button" className="button button-secondary" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Next month">›</button></div></div>
-    <div className="calendar-grid" role="grid" aria-label={monthLabel}>
+    <div className="calendar-heading"><div><span className="eyebrow">ORBIT SCHEDULE</span><h1>Community calendar</h1><p className="page-intro">Plan around upcoming events and quest deadlines.</p></div><div className="calendar-heading-actions"><div className="calendar-view-switch" role="group" aria-label="Calendar view"><button type="button" className={calendarDisplay === "month" ? "selected" : ""} aria-pressed={calendarDisplay === "month"} onClick={() => setCalendarDisplay("month")}>Month</button><button type="button" className={calendarDisplay === "agenda" ? "selected" : ""} aria-pressed={calendarDisplay === "agenda"} onClick={() => setCalendarDisplay("agenda")}>Agenda</button></div><div className="calendar-controls"><button type="button" className="button button-secondary" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Previous month">‹</button><b>{monthLabel}</b><button type="button" className="button button-secondary" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Next month">›</button></div></div></div>
+    {calendarDisplay === "month" ? <div className="calendar-grid" role="grid" aria-label={monthLabel}>
       {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <div className="calendar-weekday" role="columnheader" key={day}>{day}</div>)}
       {days.map((day, index) => {
         const entries = day === null ? [] : entriesOn(day);
@@ -702,7 +940,21 @@ function CalendarView({ events, quests, onViewDetail }: { events: CommunityEvent
           {day !== null && <><span className="calendar-day-number">{day}</span><div className="calendar-day-items">{entries.map((entry) => <button type="button" className={`calendar-event calendar-event-${entry.kind}`} key={`${entry.kind}-${entry.item.id}`} onClick={() => onViewDetail(entry)} title={`${entry.kind === "event" ? "Event" : "Quest"}: ${entry.item.title}`}><span>{entry.kind === "event" ? "E" : "Q"}</span>{entry.item.title}</button>)}</div></>}
         </div>;
       })}
-    </div>
+    </div> : <div className="calendar-agenda" aria-label={`Agenda for ${monthLabel}`}>
+      {agendaEntries.length ? agendaEntries.map((entry) => {
+        const date = new Date(entry.date);
+        const isEvent = entry.kind === "event";
+        const title = entry.item.title;
+        const supportingText = entry.kind === "event"
+          ? [date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }), entry.item.location, entry.item.status].filter(Boolean).join(" · ")
+          : `Quest deadline · ${date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+        return <article className="calendar-agenda-row" key={`${entry.kind}-${entry.item.id}`}>
+          <span className={`date-tile ${isEvent ? "sage" : "blue"}`}><b>{date.getDate()}</b><span>{date.toLocaleDateString(undefined, { month: "short" })}</span></span>
+          <span className="calendar-agenda-copy"><b>{title}</b><small>{isEvent ? "Event" : "Quest"} · {supportingText}</small></span>
+          <button type="button" className="button button-secondary" onClick={() => entry.kind === "event" ? onViewDetail({ kind: "event", item: entry.item }) : onViewDetail({ kind: "quest", item: entry.item })}>View details</button>
+        </article>;
+      }) : <div className="list-no-results">Nothing scheduled for {monthLabel}.</div>}
+    </div>}
     <div className="calendar-legend"><span><i className="legend-event" />Event</span><span><i className="legend-quest" />Quest deadline</span></div>
   </section>;
 }
@@ -898,10 +1150,52 @@ function MemberProfile({ profile, sleepUntil, userId, onProfileSaved, onSleepMod
 }
 
 function EmptyWorkspaceSection({ role, kind, count, loading, events = [], quests = [], members = [], onToggleMemberAccess, memberActionId, onViewDetail }: { role: WorkspaceRole; kind: "events" | "quests" | "members"; count: number; loading: boolean; events?: CommunityEvent[]; quests?: CommunityQuest[]; members?: DirectoryMember[]; onToggleMemberAccess?: (member: DirectoryMember) => void; memberActionId?: string | null; onViewDetail?: (detail: CommunityDetail) => void }) {
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+  const now = useCurrentTimestamp();
   const title = kind === "events" ? "Events" : kind === "quests" ? "Quests & missions" : "Member directory";
   const detail = kind === "events" ? "Community events will appear here once they’re created." : kind === "quests" ? "Quests will appear here once an admin creates them." : "Member accounts appear here after people sign up.";
   const hasData = kind === "events" ? events.length > 0 : kind === "quests" ? quests.length > 0 : members.length > 0;
-  return <><section className="page-heading"><div><span className="eyebrow">{role === "admin" ? "ORBIT COMMUNITY" : "YOUR ORBIT COMMUNITY"}</span><h1>{title}</h1><p className="page-intro">{role === "admin" ? "Review members and control member access." : "Everything here comes from your community workspace."}</p></div></section>{hasData ? <section className="workspace-panel data-list-panel">{kind === "events" && <EventList events={events} onView={onViewDetail ? (item) => onViewDetail({ kind: "event", item }) : undefined} />}{kind === "quests" && <QuestList quests={quests} onView={onViewDetail ? (item) => onViewDetail({ kind: "quest", item }) : undefined} />}{kind === "members" && <MemberList members={members} onToggleAccess={onToggleMemberAccess} busyMemberId={memberActionId} />}</section> : <section className="workspace-panel empty-page-panel"><span className="empty-illustration"><Icon name={kind === "events" ? "calendar" : kind === "quests" ? "flag" : "users"} /></span><span className="eyebrow">{loading ? "LOADING" : `${count} ${kind.toUpperCase()}`}</span><h2>{loading ? "Getting your workspace ready" : kind === "members" ? "The crew starts here." : "A fresh start."}</h2><p>{loading ? "Checking the latest ORBIT data." : detail}</p></section>}</>;
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const visibleEvents = events.filter((event) => {
+    const matchesSearch = `${event.title} ${event.description} ${event.location}`.toLocaleLowerCase().includes(normalizedSearch);
+    return matchesSearch && (filter === "all" || event.status === filter);
+  });
+  const visibleQuests = quests.filter((quest) => {
+    const matchesSearch = `${quest.title} ${quest.description}`.toLocaleLowerCase().includes(normalizedSearch);
+    const deadline = quest.deadline ? new Date(quest.deadline).getTime() : null;
+    const matchesFilter = filter === "all" || (filter === "upcoming" && (deadline === null || (now !== null && deadline >= now))) || (filter === "past" && deadline !== null && now !== null && deadline < now);
+    return matchesSearch && matchesFilter;
+  });
+  const visibleMembers = members.filter((member) => {
+    const sleeping = Boolean(member.sleepUntil && new Date(member.sleepUntil) > new Date());
+    const matchesSearch = `${member.fullName} ${member.username} ${member.crewNumber}`.toLocaleLowerCase().includes(normalizedSearch);
+    const matchesFilter = filter === "all"
+      || (filter === "active" && member.status === "active" && !sleeping)
+      || (filter === "paused" && member.status !== "active" && !sleeping)
+      || (filter === "sleeping" && sleeping);
+    return matchesSearch && matchesFilter;
+  });
+  const visibleCount = kind === "events" ? visibleEvents.length : kind === "quests" ? visibleQuests.length : visibleMembers.length;
+  const options = kind === "events"
+    ? [{ value: "all", label: "All statuses" }, { value: "open", label: "Open" }, { value: "cancelled", label: "Cancelled" }, { value: "completed", label: "Completed" }]
+    : kind === "quests"
+      ? [{ value: "all", label: "All deadlines" }, { value: "upcoming", label: "Upcoming" }, { value: "past", label: "Past deadline" }]
+      : [{ value: "all", label: "All members" }, { value: "active", label: "Active" }, { value: "paused", label: "Paused" }, { value: "sleeping", label: "Sleep mode" }];
+  const itemLabel = kind === "events" ? "events" : kind === "quests" ? "quests" : "members";
+  const searchLabel = kind === "members" ? "members" : itemLabel;
+
+  return <>
+    <section className="page-heading"><div><span className="eyebrow">{role === "admin" ? "ORBIT COMMUNITY" : "YOUR ORBIT COMMUNITY"}</span><h1>{title}</h1><p className="page-intro">{role === "admin" ? "Review members and control member access." : "Everything here comes from your community workspace."}</p></div></section>
+    {hasData
+      ? <section className="workspace-panel data-list-panel">
+          <ListToolbar search={search} onSearchChange={setSearch} filter={filter} onFilterChange={setFilter} options={options} searchLabel={searchLabel} resultCount={visibleCount} />
+          {kind === "events" && (visibleEvents.length ? <EventList events={visibleEvents} onView={onViewDetail ? (item) => onViewDetail({ kind: "event", item }) : undefined} /> : <NoListResults itemLabel={itemLabel} />)}
+          {kind === "quests" && (visibleQuests.length ? <QuestList quests={visibleQuests} onView={onViewDetail ? (item) => onViewDetail({ kind: "quest", item }) : undefined} /> : <NoListResults itemLabel={itemLabel} />)}
+          {kind === "members" && (visibleMembers.length ? <MemberList members={visibleMembers} onToggleAccess={onToggleMemberAccess} busyMemberId={memberActionId} /> : <NoListResults itemLabel={itemLabel} />)}
+        </section>
+      : <section className="workspace-panel empty-page-panel"><span className="empty-illustration"><Icon name={kind === "events" ? "calendar" : kind === "quests" ? "flag" : "users"} /></span><span className="eyebrow">{loading ? "LOADING" : `${count} ${kind.toUpperCase()}`}</span><h2>{loading ? "Getting your workspace ready" : kind === "members" ? "The crew starts here." : "A fresh start."}</h2><p>{loading ? "Checking the latest ORBIT data." : detail}</p></section>}
+  </>;
 }
 
 function localDateTimeValue(value: string) {
@@ -911,12 +1205,20 @@ function localDateTimeValue(value: string) {
 }
 
 function EventManager({ events, adminId, onChanged, onViewDetail }: { events: CommunityEvent[]; adminId: string; onChanged: () => void; onViewDetail: (event: CommunityEvent) => void }) {
+  const { t } = useLanguage();
   const emptyDraft: EventDraft = { title: "", description: "", visibility: "public", status: "open", startAt: "", location: "", capacity: "" };
   const [draft, setDraft] = useState<EventDraft>(emptyDraft);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const visibleEvents = events.filter((event) =>
+    `${event.title} ${event.description} ${event.location}`.toLocaleLowerCase().includes(normalizedSearch)
+    && (filter === "all" || event.status === filter),
+  );
 
   function editEvent(event: CommunityEvent) {
     setDraft({ title: event.title, description: event.description, visibility: event.visibility, status: event.status, startAt: localDateTimeValue(event.start_at), location: event.location, capacity: event.capacity === null ? "" : String(event.capacity) });
@@ -980,32 +1282,48 @@ function EventManager({ events, adminId, onChanged, onViewDetail }: { events: Co
   }
 
   return <>
-    <section className="page-heading management-heading"><div><span className="eyebrow">ORBIT COMMUNITY</span><h1>Events</h1><p className="page-intro">Create events and control their details, visibility, and status.</p></div><button className="button button-primary" onClick={() => { closeForm(); setFormOpen(true); }}>Create event <span>＋</span></button></section>
-    {error && <div className="workspace-error" role="alert"><b>Event action failed.</b><span>{error}</span></div>}
+    <section className="page-heading management-heading"><div><span className="eyebrow">{t("ORBIT COMMUNITY")}</span><h1>{t("Events")}</h1><p className="page-intro">{t("Create events and control their details, visibility, and status.")}</p></div><button className="button button-primary" onClick={() => { closeForm(); setFormOpen(true); }}>{t("Create event")} <span>＋</span></button></section>
+    {error && <div className="workspace-error" role="alert"><b>{t("Event action failed.")}</b><span>{error}</span></div>}
     {formOpen && <form className="workspace-panel management-form" onSubmit={saveEvent}>
-      <div className="management-form-heading"><div><span className="eyebrow">{editingId ? "UPDATE ORBIT EVENT" : "NEW ORBIT EVENT"}</span><h2>{editingId ? "Edit event" : "Create an event"}</h2></div></div>
+      <div className="management-form-heading"><div><span className="eyebrow">{t(editingId ? "UPDATE ORBIT EVENT" : "NEW ORBIT EVENT")}</span><h2>{t(editingId ? "Edit event" : "Create an event")}</h2></div></div>
       <div className="management-form-grid">
-        <label className="management-field">Event name<input required maxLength={120} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
-        <label className="management-field">Date and time<input required type="datetime-local" value={draft.startAt} onChange={(event) => setDraft({ ...draft, startAt: event.target.value })} /></label>
-        <label className="management-field">Location<input maxLength={160} value={draft.location} onChange={(event) => setDraft({ ...draft, location: event.target.value })} /></label>
-        <label className="management-field">Capacity (optional)<input type="number" min="1" step="1" value={draft.capacity} onChange={(event) => setDraft({ ...draft, capacity: event.target.value })} /></label>
-        <label className="management-field">Visibility<select value={draft.visibility} onChange={(event) => setDraft({ ...draft, visibility: event.target.value as EventDraft["visibility"] })}><option value="public">Public to members</option><option value="private">Private</option></select></label>
-        <label className="management-field">Status<select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as EventDraft["status"] })}><option value="open">Open</option><option value="cancelled">Cancelled</option><option value="completed">Completed</option></select></label>
-        <label className="management-field management-field-wide">Description<textarea rows={4} maxLength={3000} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+        <label className="management-field">{t("Event name")}<input required maxLength={120} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
+        <label className="management-field">{t("Date and time")}<input required type="datetime-local" value={draft.startAt} onChange={(event) => setDraft({ ...draft, startAt: event.target.value })} /></label>
+        <label className="management-field">{t("Location")}<input maxLength={160} value={draft.location} onChange={(event) => setDraft({ ...draft, location: event.target.value })} /></label>
+        <label className="management-field">{t("Capacity (optional)")}<input type="number" min="1" step="1" value={draft.capacity} onChange={(event) => setDraft({ ...draft, capacity: event.target.value })} /></label>
+        <label className="management-field">{t("Visibility")}<select value={draft.visibility} onChange={(event) => setDraft({ ...draft, visibility: event.target.value as EventDraft["visibility"] })}><option value="public">{t("Public to members")}</option><option value="private">{t("Private")}</option></select></label>
+        <label className="management-field">{t("Status")}<select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as EventDraft["status"] })}><option value="open">Open</option><option value="cancelled">Cancelled</option><option value="completed">Completed</option></select></label>
+        <label className="management-field management-field-wide">{t("Description")}<textarea rows={4} maxLength={3000} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
       </div>
-      <div className="management-form-actions"><button type="button" className="button button-secondary" onClick={closeForm} disabled={busy}>Cancel</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? "Saving…" : editingId ? "Save changes" : "Create event"}</button></div>
+      <div className="management-form-actions"><button type="button" className="button button-secondary" onClick={closeForm} disabled={busy}>{t("Cancel")}</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? t("Saving…") : editingId ? t("Save changes") : t("Create event")}</button></div>
     </form>}
-    {events.length ? <section className="workspace-panel data-list-panel management-list"><EventList events={events} onEdit={editEvent} onDelete={deleteEvent} onView={onViewDetail} busy={busy} /></section> : <section className="workspace-panel empty-page-panel"><span className="empty-illustration"><Icon name="calendar" /></span><span className="eyebrow">0 EVENTS</span><h2>Ready to bring the crew together?</h2><p>Create the first event and it will appear here for members.</p></section>}
+    {events.length ? <section className="workspace-panel data-list-panel management-list">
+      <ListToolbar search={search} onSearchChange={setSearch} filter={filter} onFilterChange={setFilter} options={[{ value: "all", label: "All statuses" }, { value: "open", label: "Open" }, { value: "cancelled", label: "Cancelled" }, { value: "completed", label: "Completed" }]} searchLabel="events" resultCount={visibleEvents.length} />
+      {visibleEvents.length ? <EventList events={visibleEvents} onEdit={editEvent} onDelete={deleteEvent} onView={onViewDetail} busy={busy} /> : <NoListResults itemLabel="events" />}
+    </section> : <section className="workspace-panel empty-page-panel"><span className="empty-illustration"><Icon name="calendar" /></span><span className="eyebrow">0 EVENTS</span><h2>Ready to bring the crew together?</h2><p>Create the first event and it will appear here for members.</p></section>}
   </>;
 }
 
 function QuestManager({ quests, adminId, onChanged, onViewDetail }: { quests: CommunityQuest[]; adminId: string; onChanged: () => void; onViewDetail: (quest: CommunityQuest) => void }) {
+  const { t } = useLanguage();
   const emptyDraft: QuestDraft = { title: "", description: "", xpReward: "0", goal: "1", deadline: "" };
   const [draft, setDraft] = useState<QuestDraft>(emptyDraft);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+  const now = useCurrentTimestamp();
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const visibleQuests = quests.filter((quest) => {
+    const matchesSearch = `${quest.title} ${quest.description}`.toLocaleLowerCase().includes(normalizedSearch);
+    const deadline = quest.deadline ? new Date(quest.deadline).getTime() : null;
+    const matchesFilter = filter === "all"
+      || (filter === "upcoming" && (deadline === null || (now !== null && deadline >= now)))
+      || (filter === "past" && deadline !== null && now !== null && deadline < now);
+    return matchesSearch && matchesFilter;
+  });
 
   function editQuest(quest: CommunityQuest) {
     setDraft({ title: quest.title, description: quest.description, xpReward: String(quest.xp_reward), goal: String(quest.goal), deadline: quest.deadline ? localDateTimeValue(quest.deadline) : "" });
@@ -1067,21 +1385,202 @@ function QuestManager({ quests, adminId, onChanged, onViewDetail }: { quests: Co
   }
 
   return <>
-    <section className="page-heading management-heading"><div><span className="eyebrow">ORBIT COMMUNITY</span><h1>Quests &amp; missions</h1><p className="page-intro">Set goals and XP rewards, and control the quest deadline.</p></div><button className="button button-primary" onClick={() => { closeForm(); setFormOpen(true); }}>Create quest <span>＋</span></button></section>
-    {error && <div className="workspace-error" role="alert"><b>Quest action failed.</b><span>{error}</span></div>}
+    <section className="page-heading management-heading"><div><span className="eyebrow">{t("ORBIT COMMUNITY")}</span><h1>{t("Quests & missions")}</h1><p className="page-intro">{t("Set goals and XP rewards, and control the quest deadline.")}</p></div><button className="button button-primary" onClick={() => { closeForm(); setFormOpen(true); }}>{t("Create quest")} <span>＋</span></button></section>
+    {error && <div className="workspace-error" role="alert"><b>{t("Quest action failed.")}</b><span>{error}</span></div>}
     {formOpen && <form className="workspace-panel management-form" onSubmit={saveQuest}>
-      <div className="management-form-heading"><div><span className="eyebrow">{editingId ? "UPDATE ORBIT QUEST" : "NEW ORBIT QUEST"}</span><h2>{editingId ? "Edit quest" : "Create a quest"}</h2></div></div>
+      <div className="management-form-heading"><div><span className="eyebrow">{t(editingId ? "UPDATE ORBIT QUEST" : "NEW ORBIT QUEST")}</span><h2>{t(editingId ? "Edit quest" : "Create a quest")}</h2></div></div>
       <div className="management-form-grid">
-        <label className="management-field">Quest name<input required maxLength={120} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
-        <label className="management-field">Deadline (optional)<input type="datetime-local" value={draft.deadline} onChange={(event) => setDraft({ ...draft, deadline: event.target.value })} /></label>
-        <label className="management-field">XP reward<input required type="number" min="0" step="1" value={draft.xpReward} onChange={(event) => setDraft({ ...draft, xpReward: event.target.value })} /></label>
-        <label className="management-field">Goal<input required type="number" min="1" step="1" value={draft.goal} onChange={(event) => setDraft({ ...draft, goal: event.target.value })} /></label>
-        <label className="management-field management-field-wide">Description<textarea rows={4} maxLength={3000} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+        <label className="management-field">{t("Quest name")}<input required maxLength={120} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
+        <label className="management-field">{t("Deadline (optional)")}<input type="datetime-local" value={draft.deadline} onChange={(event) => setDraft({ ...draft, deadline: event.target.value })} /></label>
+        <label className="management-field">{t("XP reward")}<input required type="number" min="0" step="1" value={draft.xpReward} onChange={(event) => setDraft({ ...draft, xpReward: event.target.value })} /></label>
+        <label className="management-field">{t("Goal")}<input required type="number" min="1" step="1" value={draft.goal} onChange={(event) => setDraft({ ...draft, goal: event.target.value })} /></label>
+        <label className="management-field management-field-wide">{t("Description")}<textarea rows={4} maxLength={3000} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
       </div>
-      <div className="management-form-actions"><button type="button" className="button button-secondary" onClick={closeForm} disabled={busy}>Cancel</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? "Saving…" : editingId ? "Save changes" : "Create quest"}</button></div>
+      <div className="management-form-actions"><button type="button" className="button button-secondary" onClick={closeForm} disabled={busy}>{t("Cancel")}</button><button type="submit" className="button button-primary" disabled={busy}>{busy ? t("Saving…") : editingId ? t("Save changes") : t("Create quest")}</button></div>
     </form>}
-    {quests.length ? <section className="workspace-panel data-list-panel management-list"><QuestList quests={quests} onEdit={editQuest} onDelete={deleteQuest} onView={onViewDetail} busy={busy} /></section> : <section className="workspace-panel empty-page-panel"><span className="empty-illustration"><Icon name="flag" /></span><span className="eyebrow">0 QUESTS</span><h2>Give the crew a challenge.</h2><p>Create a quest with a goal and XP reward to get started.</p></section>}
+    {quests.length ? <section className="workspace-panel data-list-panel management-list">
+      <ListToolbar search={search} onSearchChange={setSearch} filter={filter} onFilterChange={setFilter} options={[{ value: "all", label: "All deadlines" }, { value: "upcoming", label: "Upcoming" }, { value: "past", label: "Past deadline" }]} searchLabel="quests" resultCount={visibleQuests.length} />
+      {visibleQuests.length ? <QuestList quests={visibleQuests} onEdit={editQuest} onDelete={deleteQuest} onView={onViewDetail} busy={busy} /> : <NoListResults itemLabel="quests" />}
+    </section> : <section className="workspace-panel empty-page-panel"><span className="empty-illustration"><Icon name="flag" /></span><span className="eyebrow">0 {t("Quests").toUpperCase()}</span><h2>{t("Give the crew a challenge.")}</h2><p>{t("Create a quest with a goal and XP reward to get started.")}</p></section>}
   </>;
+}
+
+function MemberProgress({ submissions, quests, xp, loading, onNavigate }: {
+  submissions: QuestSubmission[];
+  quests: CommunityQuest[];
+  xp: number;
+  loading: boolean;
+  onNavigate: (view: ViewName) => void;
+}) {
+  const questsById = new Map(quests.map((quest) => [quest.id, quest]));
+  const approvedCount = submissions.filter((submission) => submission.status === "verified").length;
+  const pendingCount = submissions.filter((submission) => submission.status === "submitted").length;
+
+  return <>
+    <section className="page-heading">
+      <div><span className="eyebrow">YOUR QUEST JOURNEY</span><h1>My progress</h1><p className="page-intro">Track your submissions, admin feedback, and earned XP.</p></div>
+      <button type="button" className="button button-primary" onClick={() => onNavigate("Quests")}>Explore quests <span>↗</span></button>
+    </section>
+    <section className="quest-progress-summary" aria-label="Quest progress summary">
+      <div><span>Total XP</span><b>{loading ? "…" : xp}</b></div>
+      <div><span>Approved submissions</span><b>{loading ? "…" : approvedCount}</b></div>
+      <div><span>Waiting for review</span><b>{loading ? "…" : pendingCount}</b></div>
+    </section>
+    <section className="workspace-panel quest-history-panel">
+      <div className="panel-heading"><div><span className="eyebrow">SUBMISSION HISTORY</span><h2>Your quest work</h2></div><span className="count-badge">{submissions.length} total</span></div>
+      {loading
+        ? <p className="quest-history-empty">Loading your progress…</p>
+        : submissions.length === 0
+          ? <div className="empty-message"><span>✳</span><b>Your first quest is waiting</b><p>Join a quest and submit your completed work to start earning XP.</p></div>
+          : <div className="quest-history-list">{submissions.map((submission) => {
+              const quest = questsById.get(submission.quest_id);
+              return <article className="quest-history-item" key={submission.id}>
+                <div className="quest-history-heading"><div><b>{quest?.title ?? "Quest no longer available"}</b><small>Submitted {new Date(submission.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</small></div>
+                  <span className={`status-pill ${submission.status === "verified" ? "active" : submission.status === "rejected" ? "rejected" : "pending"}`}><i />{submission.status === "submitted" ? "Awaiting review" : submission.status}</span>
+                </div>
+                <p className="quest-history-text">{submission.submission_text}</p>
+                {submission.status === "verified" && quest && <p className="quest-history-feedback">+{quest.xp_reward} XP awarded</p>}
+                {submission.reviewer_feedback && <p className="quest-history-feedback"><b>Admin feedback:</b> {submission.reviewer_feedback}</p>}
+              </article>;
+            })}</div>}
+    </section>
+  </>;
+}
+
+type QuestReviewItem = {
+  submission: QuestSubmission;
+  memberName: string;
+  username: string;
+  questTitle: string;
+  xpReward: number;
+};
+
+function QuestReviewManager() {
+  const [queue, setQueue] = useState<QuestReviewItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadQueue() {
+      setLoading(true);
+      setError("");
+      try {
+        const supabase = createClient();
+        const { data: submissions, error: submissionError } = await supabase.from("quest_submissions")
+          .select("*")
+          .eq("status", "submitted")
+          .order("created_at", { ascending: true });
+        if (submissionError) throw submissionError;
+
+        const userIds = [...new Set(submissions.map((submission) => submission.user_id))];
+        const questIds = [...new Set(submissions.map((submission) => submission.quest_id))];
+        const [profilesResult, questsResult] = await Promise.all([
+          userIds.length
+            ? supabase.from("profiles").select("id, full_name, username").in("id", userIds)
+            : Promise.resolve({ data: [], error: null }),
+          questIds.length
+            ? supabase.from("quests").select("id, title, xp_reward").in("id", questIds)
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+        if (profilesResult.error) throw profilesResult.error;
+        if (questsResult.error) throw questsResult.error;
+
+        const profiles = new Map(profilesResult.data.map((profile) => [profile.id, profile]));
+        const questsById = new Map(questsResult.data.map((quest) => [quest.id, quest]));
+        const items = submissions.map((submission) => {
+          const profile = profiles.get(submission.user_id);
+          const quest = questsById.get(submission.quest_id);
+          return {
+            submission,
+            memberName: profile?.full_name ?? "Member",
+            username: profile?.username ?? "member",
+            questTitle: quest?.title ?? "Quest no longer available",
+            xpReward: quest?.xp_reward ?? 0,
+          };
+        });
+        if (active) setQueue(items);
+      } catch (loadError) {
+        console.error("Could not load quest submissions for review.", loadError);
+        const message = loadError && typeof loadError === "object" && "message" in loadError && typeof loadError.message === "string"
+          ? loadError.message
+          : "Could not load quest submissions.";
+        if (active) setError(message);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    void loadQueue();
+    return () => { active = false; };
+  }, [reloadKey]);
+
+  async function reviewSubmission(item: QuestReviewItem, status: "verified" | "rejected", feedback: string) {
+    setBusyId(item.submission.id);
+    setError("");
+    setNotice("");
+    try {
+      const { error: reviewError } = await createClient().rpc("review_orbit_quest_submission", {
+        p_submission_id: item.submission.id,
+        p_status: status,
+        p_feedback: feedback,
+      });
+      if (reviewError) throw reviewError;
+      setQueue((current) => current.filter((entry) => entry.submission.id !== item.submission.id));
+      setNotice(status === "verified"
+        ? `${item.memberName}'s work was approved. ${item.xpReward} XP was awarded.`
+        : `${item.memberName}'s work was rejected with feedback.`);
+    } catch (reviewError) {
+      console.error("Could not review quest submission.", reviewError);
+      const message = reviewError && typeof reviewError === "object" && "message" in reviewError && typeof reviewError.message === "string"
+        ? reviewError.message
+        : "Could not review this submission.";
+      setError(message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return <>
+    <section className="page-heading management-heading">
+      <div><span className="eyebrow">ORBIT COMMUNITY</span><h1>Quest review</h1><p className="page-intro">Review member work and award XP for approved submissions.</p></div>
+      <button type="button" className="button button-secondary" onClick={() => setReloadKey((key) => key + 1)} disabled={loading}>Refresh queue</button>
+    </section>
+    {error && <div className="workspace-error" role="alert"><b>Review action failed.</b><span>{error}</span></div>}
+    {notice && <div className="workspace-success" role="status">{notice}</div>}
+    <section className="workspace-panel quest-review-panel">
+      <div className="panel-heading"><div><span className="eyebrow">PENDING SUBMISSIONS</span><h2>Needs your review</h2></div><span className="count-badge">{queue.length} pending</span></div>
+      {loading
+        ? <p className="quest-history-empty">Loading submissions…</p>
+        : queue.length === 0
+          ? <div className="empty-message"><span>✓</span><b>All caught up</b><p>New quest submissions from members will appear here.</p></div>
+          : <div className="quest-review-list">{queue.map((item) => <QuestReviewCard key={item.submission.id} item={item} busy={busyId === item.submission.id} onReview={(status, feedback) => void reviewSubmission(item, status, feedback)} />)}</div>}
+    </section>
+  </>;
+}
+
+function QuestReviewCard({ item, busy, onReview }: {
+  item: QuestReviewItem;
+  busy: boolean;
+  onReview: (status: "verified" | "rejected", feedback: string) => void;
+}) {
+  const [feedback, setFeedback] = useState("");
+  return <article className="quest-review-item">
+    <header><div><b>{item.memberName}</b><small>@{item.username} · {new Date(item.submission.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</small></div><span className="xp-chip">{item.xpReward} XP</span></header>
+    <h3>{item.questTitle}</h3>
+    <p className="quest-review-evidence">{item.submission.submission_text}</p>
+    <label className="management-field">Feedback for the member
+      <textarea value={feedback} onChange={(event) => setFeedback(event.target.value)} maxLength={1000} rows={3} placeholder="Required when rejecting; optional when approving." />
+    </label>
+    <div className="quest-review-actions">
+      <button type="button" className="button button-danger" onClick={() => onReview("rejected", feedback.trim())} disabled={busy || !feedback.trim()}>{busy ? "Saving…" : "Reject with feedback"}</button>
+      <button type="button" className="button button-primary" onClick={() => onReview("verified", feedback.trim())} disabled={busy}>{busy ? "Saving…" : `Approve · ${item.xpReward} XP`}</button>
+    </div>
+  </article>;
 }
 
 function EventList({ events, onEdit, onDelete, onView, busy = false }: { events: CommunityEvent[]; onEdit?: (event: CommunityEvent) => void; onDelete?: (event: CommunityEvent) => void; onView?: (event: CommunityEvent) => void; busy?: boolean }) {
@@ -1092,7 +1591,7 @@ function EventList({ events, onEdit, onDelete, onView, busy = false }: { events:
           <span className="quicklink-icon peach"><Icon name="calendar" /></span>
           <span className="workspace-data-copy">
             <b>{event.title}</b>
-            <small>{new Date(event.start_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}{event.location ? ` · ${event.location}` : ""} · {event.visibility}{onEdit ? ` · ${event.participants?.length ?? 0} joined` : ""}</small>
+            <small>{new Date(event.start_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}{event.location ? ` · ${event.location}` : ""} · {event.visibility}{event.capacity === null ? ` · ${event.registeredCount ?? event.participants?.length ?? 0} joined` : ` · ${event.registeredCount ?? event.participants?.length ?? 0}/${event.capacity} spots`}{(event.waitlistCount ?? 0) > 0 ? ` · ${event.waitlistCount} waitlisted` : ""}</small>
           </span>
           <span className={`status-pill ${event.status === "open" ? "active" : "pending"}`}><i />{event.status}</span>
           {onView && <button type="button" className="button button-secondary detail-view-button" onClick={() => onView(event)} aria-label={`View details for ${event.title}`} title="View details"><Icon name="eye" /></button>}
@@ -1112,12 +1611,31 @@ function QuestList({ quests, onEdit, onDelete, onView, busy = false }: { quests:
   return <div className="workspace-data-list">{quests.map((quest) => <article className="workspace-data-row" key={quest.id}><span className="quicklink-icon lavender"><Icon name="flag" /></span><span className="workspace-data-copy"><b>{quest.title}</b><small>{quest.xp_reward} XP · Goal {quest.goal}{quest.deadline ? ` · Due ${new Date(quest.deadline).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : ""}{onEdit ? ` · ${quest.participants?.length ?? 0} joined` : ""}</small></span>{onView && <button type="button" className="button button-secondary detail-view-button" onClick={() => onView(quest)} aria-label={`View details for ${quest.title}`} title="View details"><Icon name="eye" /></button>}{onEdit && <div className="management-row-actions"><button className="button button-secondary" onClick={() => onEdit(quest)} disabled={busy}>Edit</button>{onDelete && <button className="button button-danger" onClick={() => onDelete(quest)} disabled={busy}>Delete</button>}</div>}</article>)}</div>;
 }
 
-function CommunityDetailDialog({ detail, role, sleeping, onToggleParticipation, onClose }: { detail: CommunityDetail; role: WorkspaceRole; sleeping: boolean; onToggleParticipation: () => void; onClose: () => void }) {
+function CommunityDetailDialog({ detail, role, sleeping, participationBusy, submissions, onSubmitQuestWork, onToggleParticipation, onClose }: {
+  detail: CommunityDetail;
+  role: WorkspaceRole;
+  sleeping: boolean;
+  participationBusy: boolean;
+  submissions: QuestSubmission[];
+  onSubmitQuestWork: (questId: string, submissionText: string) => Promise<void>;
+  onToggleParticipation: () => void;
+  onClose: () => void;
+}) {
   const isEvent = detail.kind === "event";
   const title = detail.item.title;
   const participants = detail.item.participants ?? [];
+  const submission = detail.kind === "quest"
+    ? submissions.find((item) => item.quest_id === detail.item.id)
+    : undefined;
   const deadlinePassed = detail.kind === "quest" && detail.item.deadline !== null && new Date(detail.item.deadline) <= new Date();
   const eventClosed = detail.kind === "event" && detail.item.status !== "open";
+  const eventRegistrationStatus = detail.kind === "event"
+    ? detail.item.registrationStatus ?? (detail.item.registered ? "registered" : null)
+    : null;
+  const isWaitlisted = eventRegistrationStatus === "waitlisted";
+  const isAtCapacity = detail.kind === "event"
+    && detail.item.capacity !== null
+    && (detail.item.registeredCount ?? participants.length) >= detail.item.capacity;
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
@@ -1132,7 +1650,10 @@ function CommunityDetailDialog({ detail, role, sleeping, onToggleParticipation, 
               <dl className="community-detail-list">
                 <div><dt>Date and time</dt><dd>{new Date(detail.item.start_at).toLocaleString(undefined, { dateStyle: "full", timeStyle: "short" })}</dd></div>
                 <div><dt>Location</dt><dd>{detail.item.location || "Not specified"}</dd></div>
-                <div><dt>Capacity</dt><dd>{detail.item.capacity === null ? role === "admin" ? `${participants.length} joined` : "No limit" : role === "admin" ? `${participants.length} / ${detail.item.capacity} joined` : `${detail.item.capacity} maximum attendees`}</dd></div>
+                <div><dt>Capacity</dt><dd>{detail.item.capacity === null
+                  ? `${detail.item.registeredCount ?? participants.length} joined · no limit`
+                  : `${detail.item.registeredCount ?? participants.length} / ${detail.item.capacity} confirmed`}</dd></div>
+                {(detail.item.waitlistCount ?? 0) > 0 && <div><dt>Waitlist</dt><dd>{detail.item.waitlistCount} {detail.item.waitlistCount === 1 ? "member" : "members"} waiting</dd></div>}
                 <div><dt>Visibility</dt><dd>{detail.item.visibility}</dd></div>
                 <div><dt>Status</dt><dd>{detail.item.status}</dd></div>
               </dl>
@@ -1145,11 +1666,77 @@ function CommunityDetailDialog({ detail, role, sleeping, onToggleParticipation, 
                 <div><dt>Deadline</dt><dd>{detail.item.deadline ? new Date(detail.item.deadline).toLocaleString(undefined, { dateStyle: "full", timeStyle: "short" }) : "No deadline"}</dd></div>
               </dl>
             </div>}
-        {role === "admin" && <section className="participant-list"><h3>Joined members ({participants.length})</h3>{participants.length ? <ul>{participants.map((participant) => <li key={participant.userId}><b>{participant.fullName}</b><span>@{participant.username}</span></li>)}</ul> : <p>No members have joined yet.</p>}</section>}
-        {role === "member" && <div className="participation-actions">{sleeping && <p>Your membership is asleep, so you can’t join activities right now.</p>}<button type="button" className={`button ${detail.item.registered ? "button-secondary" : "button-primary"}`} onClick={onToggleParticipation} disabled={sleeping || (!detail.item.registered && (eventClosed || deadlinePassed))}>{detail.item.registered ? "Leave activity" : "Join activity"}</button></div>}
+        {role === "admin" && <section className="participant-list"><h3>Joined members ({detail.kind === "event" ? detail.item.registeredCount ?? participants.length : participants.length})</h3>{participants.length ? <ul>{participants.map((participant) => <li key={participant.userId}><b>{participant.fullName}</b><span>@{participant.username}</span></li>)}</ul> : <p>No members have joined yet.</p>}</section>}
+        {role === "admin" && detail.kind === "event" && (detail.item.waitlistedParticipants?.length ?? 0) > 0 && <section className="participant-list event-waitlisted-list"><h3>Waitlist ({detail.item.waitlistCount ?? detail.item.waitlistedParticipants?.length ?? 0})</h3><ol>{detail.item.waitlistedParticipants?.map((participant) => <li key={participant.userId}><b>{participant.fullName}</b><span>@{participant.username}</span></li>)}</ol></section>}
+        {role === "member" && <div className="participation-actions">
+          {sleeping && <p>Your membership is asleep, so you can’t join activities right now.</p>}
+          {detail.kind === "event" && isWaitlisted && <p className="event-waitlist-notice" role="status">{detail.item.waitlistPosition
+            ? `You’re on the waitlist at position ${detail.item.waitlistPosition}. We’ll confirm your spot automatically if one opens.`
+            : "You’re on the waitlist. We’ll confirm your spot automatically if one opens."}</p>}
+          {detail.kind === "event" && !eventRegistrationStatus && isAtCapacity && <p className="event-waitlist-notice">This event is full. Join the waitlist and we’ll move you up if a spot opens.</p>}
+          <button type="button" className={`button ${eventRegistrationStatus || detail.item.registered ? "button-secondary" : "button-primary"}`} onClick={onToggleParticipation} disabled={sleeping || participationBusy || (!eventRegistrationStatus && !detail.item.registered && (eventClosed || deadlinePassed))}>
+            {participationBusy ? "Updating…" : isWaitlisted ? "Leave waitlist" : eventRegistrationStatus || detail.item.registered ? "Leave activity" : detail.kind === "event" && isAtCapacity ? "Join waitlist" : "Join activity"}
+          </button>
+          {detail.kind === "quest" && detail.item.registered && <QuestSubmissionForm quest={detail.item} submission={submission} sleeping={sleeping} onSubmit={onSubmitQuestWork} />}
+          {detail.kind === "quest" && !detail.item.registered && <p className="submission-hint">Join this quest to submit your work for review.</p>}
+        </div>}
       </section>
     </div>
   );
+}
+
+function QuestSubmissionForm({ quest, submission, sleeping, onSubmit }: {
+  quest: CommunityQuest;
+  submission: QuestSubmission | undefined;
+  sleeping: boolean;
+  onSubmit: (questId: string, submissionText: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const activeSubmission = submission?.status === "submitted" || submission?.status === "verified";
+  const deadlinePassed = quest.deadline !== null && new Date(quest.deadline) <= new Date();
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const text = draft.trim();
+    if (!text || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onSubmit(quest.id, text);
+      setDraft("");
+    } catch (submitError) {
+      console.error("Could not submit quest work.", submitError);
+      const message = submitError && typeof submitError === "object" && "message" in submitError && typeof submitError.message === "string"
+        ? submitError.message
+        : "Could not submit quest work.";
+      setError(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <section className="quest-submission-section">
+    <h3>Your submission</h3>
+    {submission && <div className="quest-submission-status">
+      <span className={`status-pill ${submission.status === "verified" ? "active" : submission.status === "rejected" ? "rejected" : "pending"}`}><i />{submission.status === "submitted" ? "Awaiting review" : submission.status}</span>
+      {submission.status === "rejected" && submission.reviewer_feedback && <p><b>Admin feedback:</b> {submission.reviewer_feedback}</p>}
+    </div>}
+    {activeSubmission
+      ? <p className="submission-hint">{submission?.status === "verified" ? "Your work was approved. The quest XP has been added to My Progress." : "Your work is waiting for an admin to review it."}</p>
+      : deadlinePassed
+        ? <p className="submission-hint">This quest deadline has passed, so new submissions are closed.</p>
+        : sleeping
+          ? <p className="submission-hint">Wake your membership before submitting quest work.</p>
+          : <form className="quest-submission-form" onSubmit={submit}>
+              <label className="submission-field">Tell us what you completed
+                <textarea value={draft} onChange={(event) => setDraft(event.target.value)} minLength={1} maxLength={3000} rows={4} required placeholder="Describe your work, add a link, or explain what you completed…" />
+              </label>
+              <div className="quest-submission-footer"><small>{draft.trim().length}/3,000 characters</small><button type="submit" className="button button-primary" disabled={busy || !draft.trim()}>{busy ? "Submitting…" : submission?.status === "rejected" ? "Resubmit work" : "Submit work"}</button></div>
+              {error && <p className="quest-submission-error" role="alert">{error}</p>}
+            </form>}
+  </section>;
 }
 
 function MemberList({ members, onToggleAccess, busyMemberId }: { members: DirectoryMember[]; onToggleAccess?: (member: DirectoryMember) => void; busyMemberId?: string | null }) {
