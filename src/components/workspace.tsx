@@ -13,6 +13,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import type { User } from "@supabase/supabase-js";
 import { OrbitLogo, OrbitSymbol } from "@/components/orbit-logo";
 import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
+import { ThemeSwitcher } from "@/lib/theme";
 import { WorkspaceOnboarding } from "@/components/workspace-onboarding";
 
 type WorkspaceRole = "admin" | "member";
@@ -523,7 +524,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
       </aside>
 
       <main className="workspace-main">
-        <header className="workspace-topbar"><div className="workspace-header-left">{activeView !== "Overview" && <button className="workspace-back-button" onClick={() => setView("Overview")} aria-label={t("Back")}><span aria-hidden="true">←</span><span>{t("Back")}</span></button>}<div className="breadcrumb"><span>ORBIT</span><span>›</span><b>{t(activeView)}</b></div></div><div className="workspace-account"><LanguageSwitcher /><span className={`role-chip ${role}`}>{role === "admin" ? "ADMIN" : "MEMBER"}</span><span className="avatar avatar-profile" aria-label="Profile photo" style={profileData?.avatarUrl ? { backgroundImage: `url("${profileData.avatarUrl}")`, backgroundPosition: "center", backgroundSize: "cover" } : undefined}>{profileData?.avatarUrl ? "" : role === "admin" ? "AD" : displayName.slice(0, 2).toUpperCase()}</span><div className="profile-copy"><b>{displayName}</b><small>{role === "admin" ? t("Platform administrator") : profileUsername ? `@${profileUsername}` : t("Crew member")}</small></div><button className="signout-button" onClick={signOut} disabled={signingOut} aria-label={t("Sign out")}><Icon name="logout" /></button></div></header>
+        <header className="workspace-topbar"><div className="workspace-header-left">{activeView !== "Overview" && <button className="workspace-back-button" onClick={() => setView("Overview")} aria-label={t("Back")}><span aria-hidden="true">←</span><span>{t("Back")}</span></button>}<div className="breadcrumb"><span>ORBIT</span><span>›</span><b>{t(activeView)}</b></div></div><div className="workspace-account"><ThemeSwitcher /><LanguageSwitcher /><span className={`role-chip ${role}`}>{role === "admin" ? "ADMIN" : "MEMBER"}</span><span className="avatar avatar-profile" aria-label="Profile photo" style={profileData?.avatarUrl ? { backgroundImage: `url("${profileData.avatarUrl}")`, backgroundPosition: "center", backgroundSize: "cover" } : undefined}>{profileData?.avatarUrl ? "" : role === "admin" ? "AD" : displayName.slice(0, 2).toUpperCase()}</span><div className="profile-copy"><b>{displayName}</b><small>{role === "admin" ? t("Platform administrator") : profileUsername ? `@${profileUsername}` : t("Crew member")}</small></div><button className="signout-button" onClick={signOut} disabled={signingOut} aria-label={t("Sign out")}><Icon name="logout" /></button></div></header>
         <div className="workspace-content">
           <section className="welcome-row">
             <div><div className="eyebrow">{role === "admin" ? t("PLATFORM ADMINISTRATION") : t("Your community")}</div><h1>{t(greeting)}, {displayName} <span className="wave">✳</span></h1><p className="page-intro">{role === "admin" ? t("Here’s a clear view of your ORBIT community.") : t("Your place in the crew, and everything happening around you.")}</p></div>

@@ -68,6 +68,7 @@ For email confirmation, open **Supabase → Authentication → URL Configuration
 - **First visit** — a dismissible, role-specific quick start points members to events, crew conversations, and updates, and admins to common setup tasks. Its dismissal is remembered per account and role in that browser.
 - **Empty Updates feed** — members are told that updates appear after an admin publishes one and can jump straight to Events or Chat; admins get a shortcut to create the first update.
 - **Language selector** — English, Indonesian, Spanish, Brazilian Portuguese, French, German, Simplified Chinese, Japanese, Korean, and Arabic are available. Core navigation, sign-in, dashboard overview, event/quest forms, chat, member directory, and announcements are localized; some secondary management screens may still show English. The choice is saved in the browser, Arabic uses a right-to-left layout, and member-written content stays in its original language.
+- **Appearance selector** — choose light, dark, or follow the device theme. The preference is saved in the browser and applies across sign-in and workspace screens.
 - `/verify/[token]` — public, minimal live membership check. The unguessable token reveals only the active member's display name and crew ID; inactive or ended memberships do not verify.
 - `/api/membership/leave` — authenticated, password-confirmed permanent account closure. It requires the server-only `SUPABASE_SERVICE_ROLE_KEY`.
 - `/auth/reset-password` — secure password reset destination reached through a Supabase email link.

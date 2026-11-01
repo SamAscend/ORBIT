@@ -1104,6 +1104,146 @@ html[dir="rtl"] .workspace-main { margin-right: 252px; margin-left: 0; }
 @media (max-width: 760px) {
   .member-hub-heading { align-items: flex-start; flex-direction: column; }
   .member-hub-layout { min-height: 0; grid-template-columns: 1fr; }
+}
+
+  .auth-language { display: flex; align-items: center; gap: 9px; }
+  .theme-switcher { display: inline-flex; min-height: 34px; align-items: center; justify-content: center; gap: 6px; border: 1px solid #e3e9e2; border-radius: 6px; background: #fff; padding: 0 9px; color: #526357; font-size: 10px; cursor: pointer; }
+  .theme-switcher:hover { border-color: #c9d8c9; background: #f5f8f4; }
+  .theme-switcher:focus-visible { outline: 2px solid #8dac8a; outline-offset: 2px; }
+
+  html[data-theme="dark"] {
+    color-scheme: dark;
+    --ink: #e2e9e3;
+    --muted: #a4b0a7;
+    --line: #2b3930;
+    --paper: #131a15;
+    --green: #8db79a;
+    --green-dark: #739c80;
+    --mint: #24352a;
+  }
+
+  html[data-theme="dark"] body,
+  html[data-theme="dark"] .workspace-shell,
+  html[data-theme="dark"] .workspace-main,
+  html[data-theme="dark"] .auth-page,
+  html[data-theme="dark"] .verification-page {
+    background: #131a15;
+    color: #dce5dd;
+  }
+
+  html[data-theme="dark"] :is(.workspace-sidebar, .workspace-topbar, .sidebar, .topbar, .workspace-panel, .panel, .metric-card, .announcement-card, .modal-card, .profile-menu, .member-hub-directory, .member-hub-conversation, .verification-panel, .list-search-field, .list-filter-field, .mobile-nav-more-menu, .quest-progress-summary > div, .calendar-day, .workspace-quicklinks > button, .online-preference) {
+    border-color: #2c3a31;
+    background-color: #1b241e;
+  }
+
+  html[data-theme="dark"] .workspace-topbar,
+  html[data-theme="dark"] .topbar {
+    background: rgb(24 33 27 / 94%);
+  }
+
+  html[data-theme="dark"] :is(.workspace-content h1, .workspace-content h2, .workspace-content h3, .workspace-content b, .workspace-content strong, .auth-form-wrap h2, .panel-heading h2, .announcement-card h3, .verification-panel h1, .member-hub-person-copy b, .member-hub-chat-heading b, .member-report-heading b) {
+    color: #e2eae3;
+  }
+
+  html[data-theme="dark"] :is(.workspace-content p, .workspace-content small, .workspace-content time, .workspace-content label, .workspace-content .page-intro, .workspace-content .eyebrow, .workspace-content .workspace-data-copy, .workspace-content .empty-message, .workspace-content .announcement-card footer, .chat-message-body, .chat-message-heading b, .chat-message-heading time, .member-hub-person-copy small, .member-hub-chat-heading small, .member-report-item p, .auth-subtitle, .auth-form label, .auth-field-hint, .auth-legal, .auth-switch-prompt, .auth-admin-note, .verification-panel > p, .verification-panel dt, .verification-panel > small) {
+    color: #aab8ad;
+  }
+
+  html[data-theme="dark"] :is(.workspace-content .workspace-panel, .workspace-content .announcement-card, .workspace-content .metric-card, .workspace-content .quest-progress-summary > div, .workspace-content .workspace-quicklinks > button, .workspace-content .calendar-day, .workspace-content .list-search-field, .workspace-content .list-filter-field, .member-hub-tabs button, .member-hub-chat-heading, .member-hub-message p, .member-hub-compose, .chat-compose-form, .chat-message-list, .quest-history-item, .quest-review-item, .member-report-item) {
+    border-color: #2c3a31;
+  }
+
+  html[data-theme="dark"] :is(.workspace-content .admin-welcome-panel, .workspace-content .quest-history-text, .workspace-content .quest-review-evidence, .workspace-content .auth-setup-note, .member-hub-person.selected, .member-hub-person:hover, .member-hub-message p, .member-hub-message.own p, .member-hub-notice, .chat-message.own, .chat-compose-form, .mobile-nav-more-menu) {
+    background-color: #222e26;
+  }
+
+  html[data-theme="dark"] :is(.nav-item, .mobile-nav-more, .workspace-back-button, .signout-button, .workspace-content .button-secondary, .workspace-content .workspace-data-row, .workspace-content .workspace-data-copy b, .workspace-content .workspace-data-copy small, .workspace-content .list-result-count, .workspace-content .calendar-weekday, .workspace-content .calendar-agenda-row, .member-hub-empty, .member-hub-person-copy, .member-report-item footer, .chat-empty-state, .chat-empty-state b, .chat-compose-footer small) {
+    color: #aab8ad;
+  }
+
+  html[data-theme="dark"] :is(.nav-item:hover, .mobile-nav-more.active, .workspace-back-button:hover, .signout-button:hover, .workspace-content .button-secondary:hover, .workspace-content .workspace-quicklinks > button:hover, .member-hub-tabs button.active) {
+    background-color: #26372b;
+    color: #c7e0ca;
+  }
+
+  html[data-theme="dark"] .button-primary {
+    background: #41684d;
+    color: #fff;
+  }
+
+  html[data-theme="dark"] .button-primary:hover:not(:disabled) {
+    background: #355a40;
+  }
+
+  html[data-theme="dark"] .button-danger {
+    border-color: #63423b;
+    background: #38231f;
+    color: #efad9e;
+  }
+
+  html[data-theme="dark"] .button-danger:hover:not(:disabled) {
+    background: #472b25;
+  }
+
+  html[data-theme="dark"] .text-link,
+  html[data-theme="dark"] .auth-resend-button,
+  html[data-theme="dark"] .auth-switch-prompt button {
+    color: #a4cba9;
+  }
+
+  html[data-theme="dark"] :is(input, select, textarea, .management-field input, .management-field select, .management-field textarea, .list-search-field input, .list-filter-field select, .member-hub-search input, .member-hub-compose textarea, .chat-compose-form textarea) {
+    border-color: #35453a;
+    background-color: #151d18;
+    color: #e0e8e1;
+  }
+
+  html[data-theme="dark"] :is(input, textarea)::placeholder {
+    color: #77877b;
+  }
+
+  html[data-theme="dark"] :is(.auth-mode-tabs, .auth-setup-note, .auth-setup-note code, .online-preference, .chat-refresh-button, .workspace-content .workspace-back-button, .workspace-content .member-hub-tabs button) {
+    border-color: #344339;
+    background-color: #202b23;
+    color: #c1d0c3;
+  }
+
+  html[data-theme="dark"] :is(.auth-mode-tabs button.selected, .workspace-content .filter-pill.selected, .workspace-content .calendar-view-switch button.selected) {
+    background-color: #304436;
+    color: #d6e8d8;
+  }
+
+  html[data-theme="dark"] :is(.auth-message, .auth-message-warning, .auth-setup-note) {
+    border-color: #4a4330;
+    background-color: #29261c;
+    color: #d4c591;
+  }
+
+  html[data-theme="dark"] :is(.announcement-empty-state, .workspace-content .empty-message, .chat-empty-state, .member-hub-empty) {
+    color: #aab8ad;
+  }
+
+  html[data-theme="dark"] .theme-switcher {
+    border-color: #35453a;
+    background: #202b23;
+    color: #d9e4da;
+  }
+
+  html[data-theme="dark"] .theme-switcher:hover {
+    border-color: #55735c;
+    background: #29382d;
+  }
+
+  html[data-theme="dark"] .auth-brand,
+  html[data-theme="dark"] .community-avatar {
+    background-color: #fff;
+  }
+
+  @media (max-width: 760px) {
+    .auth-language { gap: 6px; }
+    .theme-switcher { min-width: 34px; padding: 0 8px; }
+    .workspace-account > .theme-switcher span { display: none; }
+  }
+@media (max-width: 760px) {
   .member-hub-directory { min-height: 300px; }
   .member-hub-conversation { min-height: 440px; }
   .member-hub-compose { grid-template-columns: minmax(0, 1fr); }

@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { OrbitLogo } from "@/components/orbit-logo";
 import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
+import { ThemeSwitcher } from "@/lib/theme";
 
 type AuthMode = "member" | "admin";
 type AuthAction = "signin" | "signup" | "recovery";
@@ -185,7 +186,7 @@ export function AuthPage() {
       </section>
 
       <section className="auth-panel">
-        <div className="auth-language"><LanguageSwitcher /></div>
+        <div className="auth-language"><ThemeSwitcher /><LanguageSwitcher /></div>
         <div className="auth-form-wrap">
           <span className="eyebrow">{t(mode === "admin" ? "PLATFORM ADMINISTRATION" : "WELCOME TO YOUR CREW")}</span>
           <h2>{t(action === "signup" ? "Find your people." : action === "recovery" ? "Reset your password." : mode === "admin" ? "Admin sign in." : "Good to see you.")}</h2>

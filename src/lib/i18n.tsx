@@ -19,6 +19,13 @@ export type Locale = typeof languages[number]["code"];
 
 const english = {
   Language: "Language",
+  Appearance: "Appearance",
+  "Light mode": "Light",
+  "Dark mode": "Dark",
+  "System mode": "System",
+  "Switch to light mode": "Switch to light mode",
+  "Switch to dark mode": "Switch to dark mode",
+  "Switch to system mode": "Switch to system mode",
   "A COMMUNITY, IN MOTION": "A COMMUNITY, IN MOTION",
   "Welcome to ORBIT,": "Welcome to ORBIT,",
   "Here are a few good places to start. You can always find them in the menu.": "Here are a few good places to start. You can always find them in the menu.",
@@ -460,6 +467,46 @@ const additionalTranslations: Partial<Record<Locale, TranslationPack>> = {
   },
 };
 
+const appearanceTranslations: Record<Locale, TranslationPack> = {
+  en: {},
+  id: {
+    Appearance: "Tampilan", "Light mode": "Terang", "Dark mode": "Gelap", "System mode": "Sistem",
+    "Switch to light mode": "Ganti ke mode terang", "Switch to dark mode": "Ganti ke mode gelap", "Switch to system mode": "Ikuti pengaturan perangkat",
+  },
+  es: {
+    Appearance: "Apariencia", "Light mode": "Claro", "Dark mode": "Oscuro", "System mode": "Sistema",
+    "Switch to light mode": "Cambiar al modo claro", "Switch to dark mode": "Cambiar al modo oscuro", "Switch to system mode": "Usar el tema del dispositivo",
+  },
+  "pt-BR": {
+    Appearance: "Aparência", "Light mode": "Claro", "Dark mode": "Escuro", "System mode": "Sistema",
+    "Switch to light mode": "Mudar para o modo claro", "Switch to dark mode": "Mudar para o modo escuro", "Switch to system mode": "Usar o tema do dispositivo",
+  },
+  fr: {
+    Appearance: "Apparence", "Light mode": "Clair", "Dark mode": "Sombre", "System mode": "Système",
+    "Switch to light mode": "Passer au mode clair", "Switch to dark mode": "Passer au mode sombre", "Switch to system mode": "Suivre le thème de l’appareil",
+  },
+  de: {
+    Appearance: "Darstellung", "Light mode": "Hell", "Dark mode": "Dunkel", "System mode": "System",
+    "Switch to light mode": "Zum hellen Design wechseln", "Switch to dark mode": "Zum dunklen Design wechseln", "Switch to system mode": "Gerätedesign verwenden",
+  },
+  "zh-CN": {
+    Appearance: "外观", "Light mode": "浅色", "Dark mode": "深色", "System mode": "跟随系统",
+    "Switch to light mode": "切换到浅色模式", "Switch to dark mode": "切换到深色模式", "Switch to system mode": "跟随设备主题",
+  },
+  ja: {
+    Appearance: "外観", "Light mode": "ライト", "Dark mode": "ダーク", "System mode": "システム",
+    "Switch to light mode": "ライトモードに切り替え", "Switch to dark mode": "ダークモードに切り替え", "Switch to system mode": "デバイスのテーマに合わせる",
+  },
+  ko: {
+    Appearance: "화면 테마", "Light mode": "라이트", "Dark mode": "다크", "System mode": "시스템",
+    "Switch to light mode": "라이트 모드로 전환", "Switch to dark mode": "다크 모드로 전환", "Switch to system mode": "기기 테마에 맞추기",
+  },
+  ar: {
+    Appearance: "المظهر", "Light mode": "فاتح", "Dark mode": "داكن", "System mode": "النظام",
+    "Switch to light mode": "التبديل إلى الوضع الفاتح", "Switch to dark mode": "التبديل إلى الوضع الداكن", "Switch to system mode": "استخدام سمة الجهاز",
+  },
+};
+
 type LanguageContextValue = {
   locale: Locale;
   t: (key: string) => string;
@@ -529,7 +576,8 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     locale,
     t: (key) => {
       const translationKey = key as TranslationKey;
-      return additionalTranslations[locale]?.[translationKey]
+      return appearanceTranslations[locale][translationKey]
+        ?? additionalTranslations[locale]?.[translationKey]
         ?? translations[locale][translationKey]
         ?? english[translationKey]
         ?? key;
