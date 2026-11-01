@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/database.types";
 
@@ -51,38 +51,44 @@ export function GlobalChat({ role, userId }: { role: ChatRole; userId: string })
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [sending, setSending] = useState(false);
   const [moderatingId, setModeratingId] = useState<string | null>(null);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [live, setLive] = useState(false);
   const [error, setError] = useState("");
+  const refreshingRef = useRef(false);
   const oldestMessage = messages[0];
+
+  const refreshLatestMessages = useCallback(async (manual = false) => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    if (manual) setRefreshing(true);
+    try {
+      const { data, error: loadError } = await createClient().from("chat_messages")
+        .select(messageFields)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(pageSize);
+      if (loadError) throw loadError;
+      const hydrated = await hydrateMessages(data as MessageRecord[]);
+      setMessages((current) => mergeMessages(current, hydrated));
+      setHasOlderMessages(data.length === pageSize);
+      setError("");
+    } catch (loadError) {
+      console.error("Could not refresh ORBIT global chat.", loadError);
+      setError(loadError instanceof Error ? loadError.message : "Could not refresh chat messages.");
+    } finally {
+      setLoading(false);
+      if (manual) setRefreshing(false);
+      refreshingRef.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
     const supabase = createClient();
-
-    async function loadLatestMessages() {
-      try {
-        const { data, error: loadError } = await supabase.from("chat_messages")
-          .select(messageFields)
-          .order("created_at", { ascending: false })
-          .order("id", { ascending: false })
-          .limit(pageSize);
-        if (loadError) throw loadError;
-        const hydrated = await hydrateMessages(data as MessageRecord[]);
-        if (!active) return;
-        setMessages((current) => mergeMessages(current, hydrated));
-        setHasOlderMessages(data.length === pageSize);
-        setError("");
-      } catch (loadError) {
-        console.error("Could not load ORBIT global chat.", loadError);
-        if (active) setError(loadError instanceof Error ? loadError.message : "Could not load chat messages.");
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
 
     async function refreshMessage(id: string) {
       try {
@@ -100,7 +106,10 @@ export function GlobalChat({ role, userId }: { role: ChatRole; userId: string })
       }
     }
 
-    void loadLatestMessages();
+    const initialRefresh = window.setTimeout(() => void refreshLatestMessages(), 0);
+    const refreshInterval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshLatestMessages();
+    }, 5000);
     const channel = supabase.channel(`orbit-global-chat:${userId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "chat_messages" }, (payload) => {
         const record = (payload.new ?? payload.old) as Record<string, unknown>;
@@ -112,9 +121,11 @@ export function GlobalChat({ role, userId }: { role: ChatRole; userId: string })
 
     return () => {
       active = false;
+      window.clearTimeout(initialRefresh);
+      window.clearInterval(refreshInterval);
       void supabase.removeChannel(channel);
     };
-  }, [userId]);
+  }, [refreshLatestMessages, userId]);
 
   async function loadOlderMessages() {
     if (!oldestMessage || loadingOlder || !hasOlderMessages) return;
@@ -192,7 +203,12 @@ export function GlobalChat({ role, userId }: { role: ChatRole; userId: string })
   return <section className="global-chat-page">
     <header className="page-heading global-chat-heading">
       <div><span className="eyebrow">THE ORBIT LOUNGE</span><h1>Global chat</h1><p className="page-intro">One shared space for the whole crew and the ORBIT team.</p></div>
-      <span className={`chat-live-status ${live ? "connected" : ""}`}><i />{live ? "Live" : "Connecting"}</span>
+      <div className="chat-heading-actions">
+        <span className={`chat-live-status ${live ? "connected" : ""}`}><i />{live ? "Live" : "Checking for messages"}</span>
+        <button className="chat-refresh-button" type="button" onClick={() => void refreshLatestMessages(true)} disabled={refreshing}>
+          <span aria-hidden="true">↻</span> {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
     </header>
     <section className="workspace-panel global-chat-panel" aria-label="ORBIT global chat">
       <div className="chat-message-list" aria-live="polite">

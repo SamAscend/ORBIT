@@ -5,6 +5,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { GlobalChat } from "@/components/global-chat";
+import { MemberHub, MemberReportManager } from "@/components/member-hub";
+import { MemberPresence } from "@/components/member-presence";
 import { QRCodeCanvas } from "qrcode.react";
 import type { Database } from "@/lib/supabase/database.types";
 import type { User } from "@supabase/supabase-js";
@@ -12,7 +14,7 @@ import { OrbitLogo, OrbitSymbol } from "@/components/orbit-logo";
 
 type WorkspaceRole = "admin" | "member";
 type Counts = { members: number; events: number; quests: number; xp: number; crewNumber: number | null; membershipStatus: MembershipRecord["status"] | null; verificationToken: string | null };
-type ViewName = "Overview" | "Calendar" | "Events" | "Quests" | "Members" | "Membership" | "Profile" | "Chat";
+type ViewName = "Overview" | "Calendar" | "Events" | "Quests" | "Members" | "Membership" | "Profile" | "Chat" | "Reports";
 type Participant = { userId: string; fullName: string; username: string };
 type CommunityEvent = Pick<Database["public"]["Tables"]["events"]["Row"], "id" | "title" | "description" | "visibility" | "start_at" | "location" | "capacity" | "status"> & { registered?: boolean; participants?: Participant[] };
 type CommunityQuest = Pick<Database["public"]["Tables"]["quests"]["Row"], "id" | "title" | "description" | "xp_reward" | "goal" | "deadline"> & { registered?: boolean; participants?: Participant[] };
@@ -42,7 +44,7 @@ function workspaceLoadErrorMessage(error: unknown) {
     || normalizedMessage.includes("schema cache")
     || normalizedMessage.includes("does not exist")
   ) {
-    return "The ORBIT database is missing a required migration. Run migrations 202610270005_calendar_profiles_and_participation.sql, 202610270006_membership_lifecycle_and_verification.sql, and 202610270007_global_chat.sql in the Supabase SQL Editor, then reload this page.";
+    return "The ORBIT database is missing a required migration. Run migrations 202610270005_calendar_profiles_and_participation.sql, 202610270006_membership_lifecycle_and_verification.sql, 202610270007_global_chat.sql, 202611010001_member_interactions.sql, and 202611010002_fix_member_interaction_rls.sql in the Supabase SQL Editor, then reload this page.";
   }
 
   return message;
@@ -85,6 +87,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
   const [workspaceData, setWorkspaceData] = useState<WorkspaceData>({ events: [], quests: [], members: [] });
   const [profileUsername, setProfileUsername] = useState("");
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
+  const [showOnlineStatus, setShowOnlineStatus] = useState(false);
   const [sleepUntil, setSleepUntil] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -183,7 +186,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
           membershipStatus = memberships[0]?.status ?? null;
           verificationToken = memberships[0]?.verification_token ?? null;
           const [profileResult, xpResult, eventRegistrationsResult, questRegistrationsResult] = await Promise.all([
-            supabase.from("profiles").select("full_name, username, avatar_url").eq("id", user.id).maybeSingle(),
+            supabase.from("profiles").select("full_name, username, avatar_url, show_online_status").eq("id", user.id).maybeSingle(),
             supabase.from("xp_ledger").select("points").eq("user_id", user.id),
             supabase.from("event_registrations").select("event_id").eq("user_id", user.id).eq("status", "registered"),
             supabase.from("quest_registrations").select("quest_id").eq("user_id", user.id).eq("status", "registered"),
@@ -197,6 +200,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
           profile = profileResult.data ? { fullName: profileResult.data.full_name, username: profileResult.data.username, avatarUrl: profileResult.data.avatar_url } : null;
           setProfileUsername(profile?.username ?? "");
           setProfileData(profile);
+          setShowOnlineStatus(profileResult.data?.show_online_status ?? false);
           setSleepUntil(memberships[0]?.sleep_until ?? null);
           xp = xpResult.data.reduce((total, entry) => total + entry.points, 0);
         }
@@ -327,13 +331,15 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
     { label: "Events", icon: "calendar" },
     { label: "Quests", icon: "flag" },
     { label: "Members", icon: "users" },
+    { label: "Reports", icon: "flag" },
     { label: "Chat", icon: "chat" },
   ];
-  const memberNavigation: { label: ViewName; icon: "grid" | "calendar" | "flag" | "card" | "settings" | "chat" }[] = [
+  const memberNavigation: { label: ViewName; icon: "grid" | "calendar" | "flag" | "card" | "settings" | "chat" | "users" }[] = [
     { label: "Overview", icon: "grid" },
     { label: "Calendar", icon: "calendar" },
     { label: "Events", icon: "calendar" },
     { label: "Quests", icon: "flag" },
+    { label: "Members", icon: "users" },
     { label: "Chat", icon: "chat" },
     { label: "Membership", icon: "card" },
     { label: "Profile", icon: "settings" },
@@ -343,6 +349,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
 
   return (
     <div className={`workspace-shell ${role === "member" && activeView === "Membership" ? "print-membership-card" : ""}`}>
+      {role === "member" && <MemberPresence userId={user.id} enabled={showOnlineStatus} />}
       <aside className="workspace-sidebar">
         <Link className="brand-lockup" href={role === "admin" ? "/admin" : "/member"}><OrbitLogo className="sidebar-orbit-logo" /></Link>
         <div className="community-switcher"><span className="community-avatar"><OrbitSymbol className="community-orbit-symbol" /></span><span className="community-switch-copy"><b>ORBIT</b><small>{role === "admin" ? "Admin workspace" : "Your community"}</small></span></div>
@@ -374,6 +381,8 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
             ? <QuestManager quests={workspaceData.quests} adminId={user.id} onChanged={() => setRefreshKey((key) => key + 1)} onViewDetail={(item) => setSelectedDetail({ kind: "quest", item })} />
             : <EmptyWorkspaceSection role={role} kind="quests" count={counts.quests} loading={loading} quests={workspaceData.quests} onViewDetail={setSelectedDetail} />)}
           {activeView === "Members" && role === "admin" && <EmptyWorkspaceSection role={role} kind="members" count={counts.members} loading={loading} members={workspaceData.members} onToggleMemberAccess={toggleMemberAccess} memberActionId={memberActionId} />}
+          {activeView === "Members" && role === "member" && <MemberHub userId={user.id} showOnlineStatus={showOnlineStatus} onOnlineStatusChange={setShowOnlineStatus} />}
+          {activeView === "Reports" && role === "admin" && <MemberReportManager adminId={user.id} />}
           {activeView === "Membership" && role === "member" && <MemberCard counts={counts} loading={loading} name={displayName} sleepUntil={sleepUntil} />}
           {activeView === "Profile" && role === "member" && profileData && <MemberProfile profile={profileData} sleepUntil={sleepUntil} userId={user.id} onProfileSaved={updateProfile} onSleepModeChanged={updateSleepMode} />}
           {activeView === "Chat" && <GlobalChat role={role} userId={user.id} />}

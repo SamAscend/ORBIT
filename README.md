@@ -16,6 +16,8 @@ The ORBIT wordmark and symbol assets are in `public/images/`; the app uses them 
    - [`supabase/migrations/202610270006_membership_lifecycle_and_verification.sql`](./supabase/migrations/202610270006_membership_lifecycle_and_verification.sql) adds member-controlled pausing and private-token live card verification.
    - [`supabase/migrations/202610270007_global_chat.sql`](./supabase/migrations/202610270007_global_chat.sql) adds persistent global chat, member profile visibility for chat, and realtime updates.
    - [`supabase/migrations/202610300001_chat_member_profile_visibility.sql`](./supabase/migrations/202610300001_chat_member_profile_visibility.sql) reapplies chat profile visibility for projects where an earlier, partial version of migration 007 was run.
+   - [`supabase/migrations/202611010001_member_interactions.sql`](./supabase/migrations/202611010001_member_interactions.sql) adds an opt-in member directory presence, private direct messages, blocking, and member reports.
+   - [`supabase/migrations/202611010002_fix_member_interaction_rls.sql`](./supabase/migrations/202611010002_fix_member_interaction_rls.sql) fixes direct-message, block, and report access checks to safely validate both members despite membership row-level security.
 3. Copy `.env.example` to `.env.local` and fill in the project URL and publishable key from **Supabase → Project Settings → API**. Add the service-role key as `SUPABASE_SERVICE_ROLE_KEY` only to server environments that support account closure.
 4. Start the website:
 
@@ -54,10 +56,11 @@ For email confirmation, open **Supabase → Authentication → URL Configuration
 - `/` — member sign in, member sign up, and the separate admin sign-in entry.
 - `/member` — member dashboard, membership card, profile, and account options. Members can print or save a card; its QR code checks live membership status at `/verify/[token]`.
 - **Chat** in either workspace — the shared global ORBIT conversation, with persistent history, profile photos, and live updates. Administrators can hide/restore messages without deleting the stored record.
+- **Members** in the member workspace — find active crew members, optionally share online status, exchange direct messages, and block or report contacts. Admins can review and resolve reports. Direct messages are restricted to their participants but are stored in the ORBIT database and are not end-to-end encrypted; do not use them for sensitive information.
 - `/verify/[token]` — public, minimal live membership check. The unguessable token reveals only the active member's display name and crew ID; inactive or ended memberships do not verify.
 - `/api/membership/leave` — authenticated, password-confirmed permanent account closure. It requires the server-only `SUPABASE_SERVICE_ROLE_KEY`.
 - `/auth/reset-password` — secure password reset destination reached through a Supabase email link.
-- `/admin` — administrator dashboard, member directory, event, and quest areas.
+- `/admin` — administrator dashboard, member directory, event, quest, and member-report areas.
 
 The dashboard starts with empty events, quests, and member content. Its counts are read from Supabase; it does not use seeded demo records or browser-local sample data.
 
