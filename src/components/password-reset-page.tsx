@@ -53,8 +53,11 @@ export function PasswordResetPage() {
       const supabase = createClient();
       const { data, error: updateError } = await supabase.auth.updateUser({ password });
       if (updateError) throw updateError;
-      const destination = data.user?.app_metadata.role === "admin" ? "/admin" : "/member";
-      router.replace(destination);
+      const { error: signOutError } = await supabase.auth.signOut();
+      if (signOutError) throw signOutError;
+      const destination = new URLSearchParams({ auth: "password-reset" });
+      if (data.user?.app_metadata.role === "admin") destination.set("mode", "admin");
+      router.replace(`/?${destination.toString()}`);
       router.refresh();
     } catch (resetError) {
       console.error("Could not reset the member password.", resetError);

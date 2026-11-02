@@ -2,6 +2,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getSupabaseConfig } from "@/lib/supabase/config";
+import { hasRecoveryAuthentication } from "@/lib/supabase/auth-session";
 
 type LeaveRequest = {
   confirmation?: unknown;
@@ -36,6 +37,14 @@ export async function POST(request: Request) {
   const { data: { user }, error: userError } = await supabase.auth.getUser();
   if (userError || !user) {
     return NextResponse.json({ error: "Sign in again before closing your account." }, { status: 401 });
+  }
+  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
+  if (claimsError) {
+    console.error("Could not verify the session before account closure.", claimsError);
+    return NextResponse.json({ error: "Could not verify your sign-in. Please sign in again." }, { status: 401 });
+  }
+  if (hasRecoveryAuthentication(claimsData?.claims.amr)) {
+    return NextResponse.json({ error: "Sign in with your updated password before closing your account." }, { status: 403 });
   }
   if (user.app_metadata.role === "admin") {
     return NextResponse.json({ error: "Administrator accounts cannot use member account closure." }, { status: 403 });

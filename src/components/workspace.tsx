@@ -8,6 +8,7 @@ import { GlobalChat } from "@/components/global-chat";
 import { Announcements } from "@/components/announcements";
 import { MemberHub, MemberReportManager } from "@/components/member-hub";
 import { MemberPresence } from "@/components/member-presence";
+import { EventNotificationCenter } from "@/components/event-notification-center";
 import { QRCodeCanvas } from "qrcode.react";
 import type { Database } from "@/lib/supabase/database.types";
 import type { User } from "@supabase/supabase-js";
@@ -42,6 +43,69 @@ type EventDraft = { title: string; description: string; visibility: "public" | "
 type QuestDraft = { title: string; description: string; xpReward: string; goal: string; deadline: string };
 type CommunityDetail = { kind: "event"; item: CommunityEvent } | { kind: "quest"; item: CommunityQuest };
 type ListFilterOption = { value: string; label: string };
+const crewPulseMessages = [
+  "Small steps still move us forward.",
+  "Show up for yourself and your crew.",
+  "Every mile is better together.",
+  "Progress happens one step at a time.",
+  "Make today count, at your own pace.",
+  "Your crew is here for the journey.",
+  "Keep moving toward what matters.",
+] as const;
+
+function useDailyCrewPulseMessage() {
+  const [messageIndex, setMessageIndex] = useState(0);
+
+  useEffect(() => {
+    function updateMessage() {
+      const dateParts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Jakarta",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(new Date());
+      const year = Number(dateParts.find((part) => part.type === "year")?.value);
+      const month = Number(dateParts.find((part) => part.type === "month")?.value);
+      const day = Number(dateParts.find((part) => part.type === "day")?.value);
+      const dayNumber = Math.floor(Date.UTC(year, month - 1, day) / 86_400_000);
+      setMessageIndex(dayNumber % crewPulseMessages.length);
+    }
+
+    updateMessage();
+    const interval = window.setInterval(updateMessage, 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  return crewPulseMessages[messageIndex];
+}
+
+const sidebarPreferenceKey = "orbit-sidebar-collapsed-v1";
+const sidebarPreferenceEvent = "orbit-sidebar-preference-change";
+let memorySidebarCollapsed = false;
+
+function getSidebarCollapsed() {
+  try {
+    const savedPreference = window.localStorage.getItem(sidebarPreferenceKey);
+    if (savedPreference === "true" || savedPreference === "false") {
+      memorySidebarCollapsed = savedPreference === "true";
+    }
+  } catch (storageError) {
+    console.error("Could not read the ORBIT sidebar preference.", storageError);
+  }
+  return memorySidebarCollapsed;
+}
+
+function subscribeToSidebarPreference(callback: () => void) {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === sidebarPreferenceKey || event.key === null) callback();
+  };
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(sidebarPreferenceEvent, callback);
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(sidebarPreferenceEvent, callback);
+  };
+}
 
 function workspaceLoadErrorMessage(error: unknown) {
   if (!error || typeof error !== "object") {
@@ -61,7 +125,7 @@ function workspaceLoadErrorMessage(error: unknown) {
     || normalizedMessage.includes("schema cache")
     || normalizedMessage.includes("does not exist")
   ) {
-    return "The ORBIT database is missing a required migration. Run migrations 202610270005_calendar_profiles_and_participation.sql, 202610270006_membership_lifecycle_and_verification.sql, 202610270007_global_chat.sql, 202611010001_member_interactions.sql, 202611010002_fix_member_interaction_rls.sql, 202611010003_quest_submission_review.sql, 202611010004_admin_clear_global_chat.sql, 202611010005_event_capacity_waitlist.sql, and 202611010006_community_announcements.sql in the Supabase SQL Editor, then reload this page.";
+    return "The ORBIT database is missing a required migration. Run migrations 202610270005_calendar_profiles_and_participation.sql, 202610270006_membership_lifecycle_and_verification.sql, 202610270007_global_chat.sql, 202611010001_member_interactions.sql, 202611010002_fix_member_interaction_rls.sql, 202611010003_quest_submission_review.sql, 202611010004_admin_clear_global_chat.sql, 202611010005_event_capacity_waitlist.sql, 202611010006_community_announcements.sql, and 202611020003_event_notifications.sql in the Supabase SQL Editor, then reload this page.";
   }
 
   return message;
@@ -140,6 +204,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
   const { t } = useLanguage();
   const [view, setView] = useState<ViewName>("Overview");
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  const sidebarCollapsed = useSyncExternalStore(subscribeToSidebarPreference, getSidebarCollapsed, () => false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [greeting, setGreeting] = useState("Welcome");
   const [counts, setCounts] = useState<Counts>({ members: 0, events: 0, quests: 0, xp: 0, crewNumber: null, membershipStatus: null, verificationToken: null });
@@ -156,6 +221,18 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
   const [participationBusy, setParticipationBusy] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState<CommunityDetail | null>(null);
+  const pendingNotificationQuestId = useRef<string | null>(null);
+
+  const toggleSidebar = useCallback(() => {
+    const nextCollapsed = !sidebarCollapsed;
+    memorySidebarCollapsed = nextCollapsed;
+    try {
+      window.localStorage.setItem(sidebarPreferenceKey, String(nextCollapsed));
+    } catch (storageError) {
+      console.error("Could not save the ORBIT sidebar preference.", storageError);
+    }
+    window.dispatchEvent(new Event(sidebarPreferenceEvent));
+  }, [sidebarCollapsed]);
 
   const displayName = useMemo(() => {
     if (role === "admin") return "Admin";
@@ -313,7 +390,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
             membershipStatus,
             verificationToken,
           });
-          setWorkspaceData({
+          const nextWorkspaceData: WorkspaceData = {
             events: eventResult.data.map((communityEvent) => ({
               ...communityEvent,
               registered: eventAvailability.get(communityEvent.id)?.my_status === "registered",
@@ -332,7 +409,14 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
               participants: questParticipants.get(communityQuest.id) ?? [],
             })),
             members: directoryMembers,
-          });
+          };
+          setWorkspaceData(nextWorkspaceData);
+          const notificationQuestId = pendingNotificationQuestId.current;
+          if (notificationQuestId) {
+            const quest = nextWorkspaceData.quests.find((item) => item.id === notificationQuestId);
+            if (quest) setSelectedDetail({ kind: "quest", item: quest });
+            pendingNotificationQuestId.current = null;
+          }
           setMemberSubmissions(submissions);
         }
       } catch (loadError) {
@@ -509,14 +593,14 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
   const activeView = view;
 
   return (
-    <div className={`workspace-shell ${role === "member" && activeView === "Membership" ? "print-membership-card" : ""}`}>
+    <div className={`workspace-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${role === "member" && activeView === "Membership" ? "print-membership-card" : ""}`}>
       {role === "member" && <MemberPresence userId={user.id} enabled={showOnlineStatus} />}
       <aside className="workspace-sidebar">
-        <Link className="brand-lockup" href={role === "admin" ? "/admin" : "/member"}><OrbitLogo className="sidebar-orbit-logo" /></Link>
+        <Link className="brand-lockup" href={role === "admin" ? "/admin" : "/member"}><OrbitLogo className="sidebar-orbit-logo" /><OrbitSymbol className="sidebar-orbit-symbol" decorative /></Link>
         <div className="community-switcher"><span className="community-avatar"><OrbitSymbol className="community-orbit-symbol" /></span><span className="community-switch-copy"><b>ORBIT</b><small>{role === "admin" ? "Admin workspace" : "Your community"}</small></span></div>
         <nav className="workspace-nav" aria-label={`${role} navigation`}>
           <span className="nav-group-label">{role === "admin" ? t("Admin workspace") : t("YOUR ORBIT CREW")}</span>
-          {navigation.map((item) => <button key={item.label} className={`nav-item ${activeView === item.label ? "active" : ""} ${mobilePrimaryViews.includes(item.label) ? "mobile-nav-primary" : "mobile-nav-secondary"}`} onClick={() => { setView(item.label); setMobileMoreOpen(false); }} aria-current={activeView === item.label ? "page" : undefined}><Icon name={item.icon} /><span>{t(item.label)}</span></button>)}
+          {navigation.map((item) => <button key={item.label} title={sidebarCollapsed ? t(item.label) : undefined} aria-label={sidebarCollapsed ? t(item.label) : undefined} className={`nav-item ${activeView === item.label ? "active" : ""} ${mobilePrimaryViews.includes(item.label) ? "mobile-nav-primary" : "mobile-nav-secondary"}`} onClick={() => { setView(item.label); setMobileMoreOpen(false); }} aria-current={activeView === item.label ? "page" : undefined}><Icon name={item.icon} /><span>{t(item.label)}</span></button>)}
           {mobileSecondaryNavigation.length > 0 && <button className={`mobile-nav-more ${mobileMoreOpen || mobileSecondaryNavigation.some((item) => item.label === activeView) ? "active" : ""}`} type="button" aria-expanded={mobileMoreOpen} aria-controls="mobile-nav-more-menu" onClick={() => setMobileMoreOpen((open) => !open)}><span>•••</span><span>{t("More")}</span></button>}
           {mobileMoreOpen && mobileSecondaryNavigation.length > 0 && <div className="mobile-nav-more-menu" id="mobile-nav-more-menu">{mobileSecondaryNavigation.map((item) => <button type="button" key={item.label} className={`nav-item ${activeView === item.label ? "active" : ""}`} onClick={() => { setView(item.label); setMobileMoreOpen(false); }} aria-current={activeView === item.label ? "page" : undefined}><Icon name={item.icon} /><span>{t(item.label)}</span></button>)}</div>}
         </nav>
@@ -524,7 +608,41 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
       </aside>
 
       <main className="workspace-main">
-        <header className="workspace-topbar"><div className="workspace-header-left">{activeView !== "Overview" && <button className="workspace-back-button" onClick={() => setView("Overview")} aria-label={t("Back")}><span aria-hidden="true">←</span><span>{t("Back")}</span></button>}<div className="breadcrumb"><span>ORBIT</span><span>›</span><b>{t(activeView)}</b></div></div><div className="workspace-account"><ThemeSwitcher /><LanguageSwitcher /><span className={`role-chip ${role}`}>{role === "admin" ? "ADMIN" : "MEMBER"}</span><span className="avatar avatar-profile" aria-label="Profile photo" style={profileData?.avatarUrl ? { backgroundImage: `url("${profileData.avatarUrl}")`, backgroundPosition: "center", backgroundSize: "cover" } : undefined}>{profileData?.avatarUrl ? "" : role === "admin" ? "AD" : displayName.slice(0, 2).toUpperCase()}</span><div className="profile-copy"><b>{displayName}</b><small>{role === "admin" ? t("Platform administrator") : profileUsername ? `@${profileUsername}` : t("Crew member")}</small></div><button className="signout-button" onClick={signOut} disabled={signingOut} aria-label={t("Sign out")}><Icon name="logout" /></button></div></header>
+        <header className="workspace-topbar">
+          <div className="workspace-header-left">
+            <button className="sidebar-toggle" type="button" onClick={toggleSidebar} aria-label={t(sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")} title={t(sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")} aria-expanded={!sidebarCollapsed}>
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M9 4v16" />
+                <path d={sidebarCollapsed ? "m14 9 3 3-3 3m3-3h-5" : "m14 9-3 3 3 3m-3-3h5"} />
+              </svg>
+            </button>
+            {activeView !== "Overview" && <button className="workspace-back-button" onClick={() => setView("Overview")} aria-label={t("Back")}><span aria-hidden="true">←</span><span>{t("Back")}</span></button>}
+            <div className="breadcrumb"><span>ORBIT</span><span>›</span><b>{t(activeView)}</b></div>
+          </div>
+          <div className="workspace-account">
+            <EventNotificationCenter
+              userId={user.id}
+              onOpenNotification={({ eventId, questId }) => {
+                if (questId) {
+                  setView("Quests");
+                  pendingNotificationQuestId.current = questId;
+                  setRefreshKey((key) => key + 1);
+                  return;
+                }
+                setView("Events");
+                const event = eventId ? workspaceData.events.find((item) => item.id === eventId) : null;
+                if (event) setSelectedDetail({ kind: "event", item: event });
+              }}
+            />
+            <ThemeSwitcher />
+            <LanguageSwitcher />
+            <span className={`role-chip ${role}`}>{role === "admin" ? "ADMIN" : "MEMBER"}</span>
+            <span className="avatar avatar-profile" aria-label="Profile photo" style={profileData?.avatarUrl ? { backgroundImage: `url("${profileData.avatarUrl}")`, backgroundPosition: "center", backgroundSize: "cover" } : undefined}>{profileData?.avatarUrl ? "" : role === "admin" ? "AD" : displayName.slice(0, 2).toUpperCase()}</span>
+            <div className="profile-copy"><b>{displayName}</b><small>{role === "admin" ? t("Platform administrator") : profileUsername ? `@${profileUsername}` : t("Crew member")}</small></div>
+            <button className="signout-button" onClick={signOut} disabled={signingOut} aria-label={t("Sign out")}><Icon name="logout" /></button>
+          </div>
+        </header>
         <div className="workspace-content">
           <section className="welcome-row">
             <div><div className="eyebrow">{role === "admin" ? t("PLATFORM ADMINISTRATION") : t("Your community")}</div><h1>{t(greeting)}, {displayName} <span className="wave">✳</span></h1><p className="page-intro">{role === "admin" ? t("Here’s a clear view of your ORBIT community.") : t("Your place in the crew, and everything happening around you.")}</p></div>
@@ -535,7 +653,7 @@ export function Workspace({ role, user }: { role: WorkspaceRole; user: User }) {
 
           {activeView === "Overview" && (role === "admin"
             ? <AdminOverview counts={counts} loading={loading} events={workspaceData.events} quests={workspaceData.quests} members={workspaceData.members} onNavigate={setView} onViewDetail={setSelectedDetail} />
-            : <MemberOverview counts={counts} loading={loading} name={displayName} email={user.email ?? ""} events={workspaceData.events} quests={workspaceData.quests} onNavigate={setView} onViewDetail={setSelectedDetail} />)}
+            : <MemberOverview counts={counts} loading={loading} name={displayName} events={workspaceData.events} quests={workspaceData.quests} onNavigate={setView} />)}
           {activeView === "Calendar" && <CalendarView events={workspaceData.events} quests={workspaceData.quests} onViewDetail={setSelectedDetail} />}
           {activeView === "Events" && (role === "admin"
             ? <EventManager events={workspaceData.events} adminId={user.id} onChanged={() => setRefreshKey((key) => key + 1)} onViewDetail={(item) => setSelectedDetail({ kind: "event", item })} />
@@ -627,13 +745,38 @@ function AdminOverview({ counts, loading, events, quests, members, onNavigate, o
   </>;
 }
 
-function MemberOverview({ counts, loading, name, email, events, quests, onNavigate, onViewDetail }: { counts: Counts; loading: boolean; name: string; email: string; events: CommunityEvent[]; quests: CommunityQuest[]; onNavigate: (view: ViewName) => void; onViewDetail: (detail: CommunityDetail) => void }) {
+function MemberOverview({ counts, loading, name, events, quests, onNavigate }: { counts: Counts; loading: boolean; name: string; events: CommunityEvent[]; quests: CommunityQuest[]; onNavigate: (view: ViewName) => void }) {
   const { t } = useLanguage();
+  const now = useCurrentTimestamp();
+  const dailyMessage = useDailyCrewPulseMessage();
+  const upcomingEventCount = now === null
+    ? null
+    : events.filter((event) => event.status === "open" && new Date(event.start_at).getTime() >= now).length;
+  const openQuestCount = now === null
+    ? null
+    : quests.filter((quest) => !quest.deadline || new Date(quest.deadline).getTime() >= now).length;
+
   return <>
     <section className="member-welcome-card"><div className="welcome-card-copy"><span className="eyebrow">{t("YOUR ORBIT CREW")}</span><h2>{t("Welcome")}, {name}.</h2><p>{t("Your place in the crew, and everything happening around you.")}</p><button className="button button-primary" onClick={() => onNavigate("Events")}>{t("Events")} <span>↗</span></button></div><OrbitSymbol className="welcome-card-mark" decorative /></section>
     <section className="metric-grid workspace-metrics member-metrics"><Metric title={t("Membership")} value={counts.crewNumber === null ? "—" : `MZ-${String(counts.crewNumber).padStart(4, "0")}`} icon="card" loading={loading} /><Metric title={t("Events")} value={counts.events} icon="calendar" loading={loading} /><Metric title={t("Quests")} value={counts.quests} icon="flag" loading={loading} /><Metric title={t("My Progress")} value={counts.xp} icon="grid" loading={loading} /></section>
-    <section className="content-grid member-content-grid"><div className="workspace-panel"><div className="panel-heading"><div><span className="eyebrow">A GOOD PLACE TO START</span><h2>Find your next moment</h2></div><button className="text-link" onClick={() => onNavigate("Events")}>See events <span>↗</span></button></div>{events.length === 0 ? <EmptyMessage title="No events just yet" detail="When an organizer adds an event, you’ll find it here." /> : <EventList events={events.slice(0, 3)} onView={(item) => onViewDetail({ kind: "event", item })} />}</div><div className="workspace-panel"><div className="panel-heading"><div><span className="eyebrow">PROGRESS, NOT PERFECTION</span><h2>Quests for you</h2></div><button className="text-link" onClick={() => onNavigate("Quests")}>Explore <span>↗</span></button></div>{quests.length === 0 ? <EmptyMessage title="Your next challenge is on its way" detail="New crew quests will show up here." /> : <QuestList quests={quests.slice(0, 3)} onView={(item) => onViewDetail({ kind: "quest", item })} />}</div></section>
-    <p className="member-account-note">Signed in as <b>{email}</b>. Your member profile is managed by your account.</p>
+    <section className="crew-pulse-panel" aria-labelledby="crew-pulse-title">
+      <div className="crew-pulse-copy">
+        <span className="eyebrow">{t("Crew Pulse")}</span>
+        <h2 id="crew-pulse-title">{t(dailyMessage)}</h2>
+      </div>
+      <div className="crew-pulse-stats">
+        <button className="crew-pulse-stat" type="button" onClick={() => onNavigate("Events")} aria-label={t("Explore events")}>
+          <span className="crew-pulse-icon peach"><Icon name="calendar" /></span>
+          <span className="crew-pulse-stat-copy"><strong>{loading || upcomingEventCount === null ? "…" : upcomingEventCount}</strong><small>{t("Upcoming events")}</small></span>
+          <span className="crew-pulse-arrow" aria-hidden="true">↗</span>
+        </button>
+        <button className="crew-pulse-stat" type="button" onClick={() => onNavigate("Quests")} aria-label={t("Explore quests")}>
+          <span className="crew-pulse-icon lavender"><Icon name="flag" /></span>
+          <span className="crew-pulse-stat-copy"><strong>{loading || openQuestCount === null ? "…" : openQuestCount}</strong><small>{t("Open quests")}</small></span>
+          <span className="crew-pulse-arrow" aria-hidden="true">↗</span>
+        </button>
+      </div>
+    </section>
   </>;
 }
 
@@ -1750,8 +1893,4 @@ function MemberList({ members, onToggleAccess, busyMemberId }: { members: Direct
 function Metric({ title, value, icon, loading }: { title: string; value: number | string; icon: "users" | "calendar" | "flag" | "grid" | "card"; loading: boolean }) {
   const tone = icon === "users" || icon === "card" ? "green" : icon === "calendar" ? "peach" : icon === "flag" ? "lavender" : "yellow";
   return <article className="metric-card"><div className="metric-top"><span>{title}</span><span className={`metric-icon ${tone}`}><Icon name={icon} /></span></div><strong>{loading ? "…" : typeof value === "number" ? value.toLocaleString() : value}</strong><span className="metric-change">Live ORBIT data</span></article>;
-}
-
-function EmptyMessage({ title, detail }: { title: string; detail: string }) {
-  return <div className="empty-message"><span>✳</span><b>{title}</b><p>{detail}</p></div>;
 }

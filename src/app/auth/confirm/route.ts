@@ -24,7 +24,9 @@ export async function GET(request: NextRequest) {
     const requestedNext = request.nextUrl.searchParams.get("next");
     const destinationPath = requestedNext === "/auth/reset-password"
       ? requestedNext
-      : data.user.app_metadata.role === "admin" ? "/admin" : "/member";
+      : type === "signup"
+        ? "/member"
+        : data.user.app_metadata.role === "admin" ? "/admin" : "/member";
     const destination = new URL(destinationPath, request.url);
     return NextResponse.redirect(destination);
   } catch (error) {

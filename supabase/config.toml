@@ -1,0 +1,4 @@
+project_id = "orbit-community-platform"
+
+[functions.orbit-event-notifications]
+verify_jwt = false

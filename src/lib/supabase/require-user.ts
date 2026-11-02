@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "./server";
+import { hasRecoveryAuthentication } from "./auth-session";
 
 export async function requireUser(role: "admin" | "member") {
   const supabase = await createClient();
@@ -9,6 +10,12 @@ export async function requireUser(role: "admin" | "member") {
 
   const actualRole = user.app_metadata.role === "admin" ? "admin" : "member";
   if (actualRole !== role) redirect(`/${actualRole}`);
+
+  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
+  if (claimsError) throw claimsError;
+  if (hasRecoveryAuthentication(claimsData?.claims.amr)) {
+    redirect(`/?mode=${role}&auth=recovery-session`);
+  }
 
   if (role === "member") {
     const { data: membership, error: membershipError } = await supabase

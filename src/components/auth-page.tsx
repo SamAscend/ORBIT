@@ -7,6 +7,7 @@ import { getSupabaseConfig } from "@/lib/supabase/config";
 import { OrbitLogo } from "@/components/orbit-logo";
 import { LanguageSwitcher, useLanguage } from "@/lib/i18n";
 import { ThemeSwitcher } from "@/lib/theme";
+import { hasRecoveryAuthentication } from "@/lib/supabase/auth-session";
 
 type AuthMode = "member" | "admin";
 type AuthAction = "signin" | "signup" | "recovery";
@@ -61,24 +62,39 @@ export function AuthPage() {
       if (params.get("access") === "membership") setMessage("This account does not currently have an active ORBIT membership. Contact a community administrator.");
       if (params.get("access") === "paused") setMessage("Your ORBIT membership is paused. Contact an administrator if you would like to reactivate it.");
       if (params.get("auth") === "confirmation-failed") setMessage("Email confirmation could not be completed. Request a new confirmation email and use the latest link.");
+      if (params.get("auth") === "recovery-session") setMessage("Password recovery sessions cannot open ORBIT. Sign in with your updated password.");
+      if (params.get("auth") === "password-reset") setMessage("Your password has been updated. Sign in with your new password.");
       if (params.get("account") === "closed") setMessage("Your ORBIT account has been closed and its live membership verification has been revoked.");
     }, 0);
 
     if (configured && new URLSearchParams(window.location.search).get("account") !== "closed") {
       void Promise.resolve()
         .then(() => createClient().auth.getSession())
-        .then(({ data, error }) => {
+        .then(async ({ data, error }) => {
           if (error) {
             console.error("Could not check the current Supabase session.", error);
             return;
           }
-          if (data.session?.user) router.replace(data.session.user.app_metadata.role === "admin" ? "/admin" : "/member");
+          if (!data.session?.user) return;
+
+          const supabase = createClient();
+          const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
+          if (claimsError) throw claimsError;
+          if (hasRecoveryAuthentication(claimsData?.claims.amr)) {
+            setMessage("Password recovery sessions cannot open ORBIT. Sign in with your updated password.");
+            return;
+          }
+          const actualRole = data.session.user.app_metadata.role === "admin" ? "admin" : "member";
+          router.replace(actualRole === "admin" ? "/admin" : "/member");
         })
-        .catch((error: unknown) => console.error("Could not check the current Supabase session.", error));
+        .catch((error: unknown) => {
+          console.error("Could not check the current Supabase session.", error);
+          setMessage(error instanceof Error ? error.message : "Could not verify the current sign-in.");
+        });
     }
 
     return () => window.clearTimeout(timer);
-  }, [configured, router]);
+  }, [configured, router, t]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -125,7 +141,6 @@ export function AuthPage() {
 
         setConfirmationEmail("");
         router.replace("/member");
-        router.refresh();
         return;
       }
 

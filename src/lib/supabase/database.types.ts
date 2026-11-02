@@ -13,6 +13,11 @@ export type Database = {
         { id: string; full_name: string; username: string; avatar_url?: string | null; is_admin?: boolean; show_online_status?: boolean },
         { full_name?: string; username?: string; avatar_url?: string | null; is_admin?: boolean; show_online_status?: boolean; updated_at?: string }
       >;
+      orbit_passkey_accounts: Table<
+        { user_id: string; enrolled_at: string },
+        { user_id: string; enrolled_at?: string },
+        never
+      >;
       chat_messages: Table<
         { id: string; sender_id: string | null; body: string; is_hidden: boolean; moderated_at: string | null; moderated_by: string | null; created_at: string },
         { sender_id: string | null; body: string; is_hidden?: boolean; moderated_at?: string | null; moderated_by?: string | null },
@@ -52,6 +57,16 @@ export type Database = {
         { id: string; community_id: string; title: string; body: string; is_published: boolean; is_pinned: boolean; created_by: string; created_at: string; updated_at: string },
         { community_id: string; title: string; body: string; created_by: string; is_published?: boolean; is_pinned?: boolean },
         { title?: string; body?: string; is_published?: boolean; is_pinned?: boolean }
+      >;
+      event_notifications: Table<
+        { id: string; user_id: string; event_id: string | null; quest_id: string | null; event_title: string; kind: "registration_confirmed" | "waitlisted" | "waitlist_promoted" | "event_updated" | "event_cancelled" | "event_reminder" | "quest_published"; created_at: string; read_at: string | null },
+        never,
+        { read_at?: string | null }
+      >;
+      event_notification_emails: Table<
+        { notification_id: string; status: "pending" | "sent" | "failed"; attempts: number; next_attempt_at: string; sent_at: string | null; last_error: string | null },
+        never,
+        never
       >;
       memberships: Table<
         { id: string; community_id: string; user_id: string; crew_number: number; status: "active" | "suspended" | "left"; sleep_until: string | null; verification_token: string; created_at: string },
